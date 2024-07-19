@@ -232,8 +232,6 @@ class Peer2PeerNetwork(Network):
 
         self.round_idx += 1
 
-
-
 class EarlyStopping:
     def __init__(self, patience=20, delta=0.001):
         self.patience = patience
@@ -241,24 +239,43 @@ class EarlyStopping:
         self.best_score = None
         self.early_stop = False
         self.counter = 0
-
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, round, network):
         score = -val_loss
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, round, network)
         elif score < self.best_score + self.delta:
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, round, network)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
-        torch.save(model.state_dict(), 'checkpoint.pt')
+    def save_checkpoint(self, val_loss, model, round, network):
+        # torch.save(model.state_dict(), 'checkpoint.pt')
+        round_path = os.path.join(network.logger_path, 'round_%s' % round)
+        os.makedirs(round_path, exist_ok=True)
+        path_global = round_path + '/model_global.pth'
+        model_dict = {
+            'round': round,
+            'model_state': model.net.state_dict()
+        }
+        torch.save(model_dict, path_global)
+
+class ExponentialDecayScheduler:
+    def __init__(self, initial_lr, decay_rate, decay_steps):
+        self.initial_lr = initial_lr
+        self.decay_rate = decay_rate
+        self.decay_steps = decay_steps
+        self.current_step = 0
+
+    def step(self):
+        self.current_step += 1
+        return self.initial_lr * (self.decay_rate ** (self.current_step / self.decay_steps))
+
 
 class Peer2PeerNetworkABP(Network):
     def __init__(self, args):        
@@ -269,9 +286,12 @@ class Peer2PeerNetworkABP(Network):
         self.evaluation_results = []  
         self.k = args.local_steps  # Number of local iterations
 
-        self.alpha = 0.00001  # Step size/learning rate
+        self.alpha = 0.00002  # Step size/learning rate
         self.beta = 0.0000    # Heavy-ball momentum parameter
         self.gamma = 0.00001   # Nesterov momentum parameter
+        self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
+
+        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.96, decay_steps=3000)
         
         self.stop_criterion = False
 
@@ -279,9 +299,9 @@ class Peer2PeerNetworkABP(Network):
         self.y = []
         self.x_prev = []
 
-        self.schedulers = []  # Store schedulers for each worker
+        # self.schedulers = []  # Store schedulers for each worker
 
-        self.early_stopping = EarlyStopping(patience=20, delta=0.001)
+        # self.early_stopping = EarlyStopping(patience=20, delta=0.001)
 
         for worker_id, model in enumerate(self.workers_models):
             s_worker = []
@@ -304,14 +324,17 @@ class Peer2PeerNetworkABP(Network):
             predictions = model.net(x)
             loss = model.criterion(predictions, y)
             loss.backward()
-            
+
+            # Apply gradient clipping
+            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
+
             for param in model.net.parameters():
                 y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             self.y.append(y_worker)
 
-            # Create and store a scheduler for each worker's optimizer
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model.optimizer, 'min', patience=10, factor=0.5, verbose=True)
-            self.schedulers.append(scheduler)
+            # # Create and store a scheduler for each worker's optimizer
+            # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model.optimizer, 'min', patience=10, factor=0.5)
+            # self.schedulers.append(scheduler)
 
     def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
         rng = np.random.default_rng()
@@ -328,14 +351,19 @@ class Peer2PeerNetworkABP(Network):
         model = self.workers_models[worker_id]
         model.net.to(self.device)
         for _ in range(self.k):
-            model.net.zero_grad()
-            x, y = next(iter(self.workers_iterators[worker_id]))
-            x = x.to(self.device, dtype=torch.float)
-            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
-            predictions = model.net(x)
-            loss = model.criterion(predictions, y)
-            loss.backward()
-            model.optimizer.step()
+        #     model.net.zero_grad()
+        #     x, y = next(iter(self.workers_iterators[worker_id]))
+        #     x = x.to(self.device, dtype=torch.float)
+        #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+        #     predictions = model.net(x)
+        #     loss = model.criterion(predictions, y)
+        #     loss.backward()
+        #     model.optimizer.step()
+            if self.fit_by_epoch:
+                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
+                                    n_epochs=self.local_steps, verbose=0)
+            else:
+                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
 
     def mix(self, write_results=True):
         gradients_list = []
@@ -352,6 +380,9 @@ class Peer2PeerNetworkABP(Network):
             loss = model.criterion(predictions, y)
             loss.backward()
             
+            # Apply gradient clipping
+            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
+
             gradients = []
             for param in model.net.parameters():
                 gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
@@ -401,7 +432,11 @@ class Peer2PeerNetworkABP(Network):
             predictions = model.net(x)
             loss = model.criterion(predictions, y)
             loss.backward()
+
+            # Apply gradient clipping
+            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
             
+
             new_gradients = []
             for param in model.net.parameters():
                 new_gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
@@ -425,22 +460,24 @@ class Peer2PeerNetworkABP(Network):
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
                 # Plot results after evaluation
 
-        if (self.round_idx % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.n_rounds:
+        if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.max_round:
             # if not self.args.test:
             self.save_models(round=self.round_idx)
             self.plot_results()
 
         # Check early stopping criteria
-        val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)
-        self.early_stopping(val_loss, self.global_model)
-        if self.early_stopping.early_stop:
-            print("Early stopping")
-            return
+        # val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)
+        # self.early_stopping(val_loss, self.global_model, self.round_idx, self)
+        # if self.early_stopping.early_stop:
+        #     print("Early stopping")
+        #     return
 
         # Update learning rate schedulers
-        for scheduler in self.schedulers:
-            scheduler.step(val_loss)
+        # for scheduler in self.schedulers:
+        #     scheduler.step()
 
+        # Update alpha using the scheduler
+        self.alpha = self.scheduler.step()
         self.round_idx += 1
 
 
