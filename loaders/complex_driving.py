@@ -135,7 +135,7 @@ def central_image_crop(img, crop_width=150, crop_heigth=150):
 
 def get_iterator_complex_driving(file_path, device, batch_size=1, num_workers=0):
     """
-    returns an iterator over UDACITY-DRIVING dataset batches
+    Returns an iterator over UDACITY-DRIVING dataset batches
     :param file_path: path to .npz file containing a list of tuples
          each of them representing a path to an image and it class
     :param device:
@@ -144,9 +144,7 @@ def get_iterator_complex_driving(file_path, device, batch_size=1, num_workers=0)
     """
 
     dataset = ComplexDrivingData(file_path, device=device)
-    if 'test' in file_path or 'validation' in file_path:
-        iterator = DataLoader(dataset, shuffle=False, batch_size=batch_size, num_workers=num_workers)
-    else:
-        iterator = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=num_workers)
-
+    iterator = DataLoader(
+        dataset, shuffle='train' in file_path, batch_size=batch_size, num_workers=num_workers, pin_memory=True
+    )
     return iterator

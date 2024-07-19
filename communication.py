@@ -34,6 +34,7 @@ class Network(ABC):
         self.initial_lr = args.lr
         self.optimizer_name = args.optimizer
         self.lr_scheduler_name = args.decay
+        self.max_round = args.n_rounds
 
         # create logger
         if args.save_logg_path == "":
@@ -324,6 +325,10 @@ class Peer2PeerNetworkABP(Network):
                 for worker_model in self.workers_models:
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
+            if (self.round_idx - 1) == self.max_round:
+                self.save_models(round=self.round_idx)
+                self.plot_results()
+            # self.save_evaluation_results()
 
         A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=5, additional_edges=5)
 
@@ -385,10 +390,10 @@ class Peer2PeerNetworkABP(Network):
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
                 # Plot results after evaluation
 
-        if (self.round_idx % 1000 == 0 and self.round_idx!= 0 and not self.args.test):
-            # if not self.args.test:
-            self.save_models(round=self.round_idx)
-            self.plot_results()
+        # if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test):
+        #     # if not self.args.test:
+        #     self.save_models(round=self.round_idx)
+        #     self.plot_results()
 
         self.round_idx += 1
 
