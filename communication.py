@@ -13,6 +13,7 @@ import numpy as np
 from scipy.sparse.csgraph import connected_components
 from scipy.sparse import csr_matrix
 import matplotlib.pyplot as plt
+import threading
 
 class Network(ABC):
     def __init__(self, args):
@@ -172,17 +173,20 @@ class Network(ABC):
             self.workers_models[i].net.load_state_dict(model_data.get('model_state', model_data))
 
     def plot_results(self):
-        plt.figure(figsize=(10, 5))
-        plt.plot(self.rounds, self.train_losses, color='r', label='Train Loss')
-        plt.plot(self.rounds, self.test_losses, color='g', label='Test Loss')
-        plt.xlabel('Communication Rounds')
-        plt.ylabel('Loss')
-        plt.title('Training and Testing Loss over Rounds')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(self.logger_path, 'losses_plot_%s.png' % self.round_idx))
-        plt.show()
-        plt.close()
+        def plot():
+            plt.figure(figsize=(10, 5))
+            plt.plot(self.rounds, self.train_losses, color='r', label='Train Loss')
+            plt.plot(self.rounds, self.test_losses, color='g', label='Test Loss')
+            plt.xlabel('Communication Rounds')
+            plt.ylabel('Loss')
+            plt.title('Training and Testing Loss over Rounds')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(self.logger_path, 'losses_plot_%s.png' % self.round_idx))
+            plt.close()
+
+        plot_thread = threading.Thread(target=plot)
+        plot_thread.start()
 
     def save_evaluation_results(self):
         with open(os.path.join(self.logger_path, 'evaluation_results.txt'), 'w') as f:

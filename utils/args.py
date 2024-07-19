@@ -104,7 +104,7 @@ def parse_args(args_list=None):
         '--save_logg_path',
         help='path to save logg and models',
         type=str,
-        default="results"
+        default="results/results_19_7"
     )
     if args_list:
         args = parser.parse_args(args_list)
