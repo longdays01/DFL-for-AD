@@ -322,8 +322,8 @@ class DrivingNet(Model):
 
         x, y = next(iter(iterator))
 
-        x = x.to(self.device, dtype=torch.float)
-        y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+        x = x.to(self.device)
+        y = y.unsqueeze(-1).to(self.device)
 
         self.optimizer.zero_grad()
 
@@ -338,20 +338,11 @@ class DrivingNet(Model):
         if update:
             self.optimizer.step()
             # self.lr_scheduler.step()
-        else: 
-            gradients = []
-            for param in self.net.parameters():
-                if param.grad is not None:
-                    gradients.append(param.grad.clone())
-                    if param.grad.sum() == 0:
-                        print(f'Warning: Zero gradient detected at parameter with shape {param.grad.shape}')
-                else:
-                    print('Warning: No gradient detected for a parameter')
 
         batch_loss = loss.item()
         batch_acc = acc.item()
 
-        return gradients, batch_loss, batch_acc
+        return batch_loss, batch_acc
 
     def evaluate_iterator(self, iterator):
         epoch_loss = 0
