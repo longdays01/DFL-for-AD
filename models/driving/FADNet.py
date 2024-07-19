@@ -299,8 +299,8 @@ class DrivingNet(Model):
 
         for x, y in iterator:
             self.optimizer.zero_grad()
-            x = x.to(self.device)
-            y = y.unsqueeze(-1).to(self.device)
+            x = x.to(self.device, dtype=torch.float)
+            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
             predictions = self.net(x)
 
             loss = self.criterion(predictions, y)
@@ -322,8 +322,8 @@ class DrivingNet(Model):
 
         x, y = next(iter(iterator))
 
-        x = x.to(self.device)
-        y = y.unsqueeze(-1).to(self.device)
+        x = x.to(self.device, dtype=torch.float)
+        y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
 
         self.optimizer.zero_grad()
 

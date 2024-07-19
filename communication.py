@@ -138,8 +138,8 @@ class Network(ABC):
         self.logger_write_param.write(f'\t -----: Total Time: {time.time() - self.time_start:.3f}')
 
         self.time_start_update = time.time()
-        if not self.args.test:
-            self.save_models(round=self.round_idx)
+        # if not self.args.test:
+        #     self.save_models(round=self.round_idx)
 
     def save_models(self, round):
         round_path = os.path.join(self.logger_path, 'round_%s' % round)
@@ -229,6 +229,33 @@ class Peer2PeerNetwork(Network):
         self.round_idx += 1
 
 
+
+class EarlyStopping:
+    def __init__(self, patience=20, delta=0.001):
+        self.patience = patience
+        self.delta = delta
+        self.best_score = None
+        self.early_stop = False
+        self.counter = 0
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        torch.save(model.state_dict(), 'checkpoint.pt')
+
 class Peer2PeerNetworkABP(Network):
     def __init__(self, args):        
         super(Peer2PeerNetworkABP, self).__init__(args)
@@ -247,6 +274,10 @@ class Peer2PeerNetworkABP(Network):
         self.s = []
         self.y = []
         self.x_prev = []
+
+        self.schedulers = []  # Store schedulers for each worker
+
+        self.early_stopping = EarlyStopping(patience=20, delta=0.001)
 
         for worker_id, model in enumerate(self.workers_models):
             s_worker = []
@@ -273,6 +304,10 @@ class Peer2PeerNetworkABP(Network):
             for param in model.net.parameters():
                 y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             self.y.append(y_worker)
+
+            # Create and store a scheduler for each worker's optimizer
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model.optimizer, 'min', patience=10, factor=0.5, verbose=True)
+            self.schedulers.append(scheduler)
 
     def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
         rng = np.random.default_rng()
@@ -325,10 +360,6 @@ class Peer2PeerNetworkABP(Network):
                 for worker_model in self.workers_models:
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
-            if (self.round_idx - 1) == self.max_round:
-                self.save_models(round=self.round_idx)
-                self.plot_results()
-            # self.save_evaluation_results()
 
         A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=5, additional_edges=5)
 
@@ -390,15 +421,26 @@ class Peer2PeerNetworkABP(Network):
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
                 # Plot results after evaluation
 
-        # if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test):
-        #     # if not self.args.test:
-        #     self.save_models(round=self.round_idx)
-        #     self.plot_results()
+        if (self.round_idx % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.n_rounds:
+            # if not self.args.test:
+            self.save_models(round=self.round_idx)
+            self.plot_results()
+
+        # Check early stopping criteria
+        val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)
+        self.early_stopping(val_loss, self.global_model)
+        if self.early_stopping.early_stop:
+            print("Early stopping")
+            return
+
+        # Update learning rate schedulers
+        for scheduler in self.schedulers:
+            scheduler.step(val_loss)
 
         self.round_idx += 1
 
 
-        # Generate the Adjacency matrix
+    # Generate the Adjacency matrix
     def getAdjMat(self, rng, n, min_degree, additional_edges=5):
         Adj = np.zeros((n, n))
         if n == 1:
