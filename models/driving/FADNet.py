@@ -337,7 +337,7 @@ class DrivingNet(Model):
 
         if update:
             self.optimizer.step()
-            # self.lr_scheduler.step()
+            self.lr_scheduler.step()
 
         batch_loss = loss.item()
         batch_acc = acc.item()
