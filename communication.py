@@ -40,7 +40,9 @@ class Network(ABC):
         self.min_degree = args.min_degree
         self.best_rmse = float('inf')
         self.best_round = 0
+        self.rmse_flag = False
         self.small_rmse_flag = False
+        self.medium_rmse_flag = False
         # create logger
         if args.save_logg_path == "":
             self.logger_path = os.path.join("loggs", args_to_string(args), args.architecture)
@@ -145,7 +147,12 @@ class Network(ABC):
         self.time_start_update = time.time()
 
         if test_rmse < 0.3:
-            self.small_rmse_flag = True
+            self.rmse_flag = True
+            if test_rmse < 0.1:
+                self.medium_rmse_flag = True
+                if test_rmse < 0.07:
+                    self.small_rmse_flag = True
+
             if test_rmse < self.best_rmse:
                 self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
                 self.best_rmse = test_rmse
@@ -462,7 +469,9 @@ class Peer2PeerNetworkABP(Network):
                 gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             gradients_list.append(gradients)        
 
-        if self.small_rmse_flag: self.log_freq = 5
+        if self.rmse_flag: self.log_freq = 8
+        if self.medium_rmse_flag: self.log_freq = 4
+        if self.small_rmse_flag: self.log_freq = 1
 
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
