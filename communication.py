@@ -336,6 +336,20 @@ class ExponentialDecayScheduler:
         self.current_step += 1
         return self.initial_lr * (self.decay_rate ** (self.current_step / self.decay_steps))
 
+    def state_dict(self):
+        return {
+            'initial_lr': self.initial_lr,
+            'decay_rate': self.decay_rate,
+            'decay_steps': self.decay_steps,
+            'current_step': self.current_step
+        }
+
+    def load_state_dict(self, state_dict):
+        self.initial_lr = state_dict['initial_lr']
+        self.decay_rate = state_dict['decay_rate']
+        self.decay_steps = state_dict['decay_steps']
+        self.current_step = state_dict['current_step']
+
 
 class Peer2PeerNetworkABP(Network):
     def __init__(self, args):        
