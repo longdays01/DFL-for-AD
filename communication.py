@@ -286,12 +286,12 @@ class Peer2PeerNetworkABP(Network):
         self.evaluation_results = []  
         self.k = args.local_steps  # Number of local iterations
 
-        self.alpha = 0.00002  # Step size/learning rate
+        self.alpha = 0.000001  # Step size/learning rate
         self.beta = 0.0000    # Heavy-ball momentum parameter
-        self.gamma = 0.00001   # Nesterov momentum parameter
+        self.gamma = 0.0000001   # Nesterov momentum parameter
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
 
-        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.96, decay_steps=3000)
+        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
         
         self.stop_criterion = False
 
@@ -396,7 +396,7 @@ class Peer2PeerNetworkABP(Network):
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
 
-        A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=5, additional_edges=5)
+        A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=4, additional_edges=2)
 
         x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         s_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
@@ -460,10 +460,10 @@ class Peer2PeerNetworkABP(Network):
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
                 # Plot results after evaluation
 
-        if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.max_round:
-            # if not self.args.test:
-            self.save_models(round=self.round_idx)
-            self.plot_results()
+        # if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.max_round:
+        #     # if not self.args.test:
+        #     self.save_models(round=self.round_idx)
+        #     self.plot_results()
 
         # Check early stopping criteria
         # val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)

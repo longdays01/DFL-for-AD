@@ -17,7 +17,7 @@ if __name__ == "__main__":
     print("Run experiment in sequential setting..")
 
     if args.architecture == "ring":
-        network = Peer2PeerNetworkABP(args)
+        network = Peer2PeerNetwork(args)
     else:
         print("Not Support yet!")
 
