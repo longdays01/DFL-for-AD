@@ -362,10 +362,10 @@ class Peer2PeerNetworkABP(Network):
 
         # self.alpha = 0.00002  # Step size/learning rate
         self.beta = 0.0000    # Heavy-ball momentum parameter
-        self.gamma = 0.00001   # Nesterov momentum parameter
+        self.gamma = 0.0000001   # Nesterov momentum parameter
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
 
-        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.96, decay_steps=3000)
+        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
         
         self.stop_criterion = False
 
