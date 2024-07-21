@@ -1,6 +1,7 @@
+import os
 import argparse
+from datetime import datetime
 from utils.utils import get_network
-
 
 def parse_args(args_list=None):
     parser = argparse.ArgumentParser()
@@ -104,7 +105,19 @@ def parse_args(args_list=None):
         '--save_logg_path',
         help='path to save logg and models',
         type=str,
-        default="results/results_19_7"
+        default="results"
+    )
+    parser.add_argument(
+        '--alpha',
+        help='step size/learning rate of individual agent',
+        type=float,
+        default=0.00001
+    )
+    parser.add_argument(
+        '--min_degree',
+        help='minimum degree of the communication matrix',
+        type=int,
+        default=5
     )
     if args_list:
         args = parser.parse_args(args_list)
@@ -113,5 +126,13 @@ def parse_args(args_list=None):
 
     network = get_network(args.network_name, args.architecture, args.experiment)
     args.num_workers = network.number_of_nodes()
+
+    # Create dynamic results folder name
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    args.save_logg_path = f"results_{args.alpha}_lr{args.lr}_md{args.min_degree}_{timestamp}"
+    
+    # Create the directory if it doesn't exist
+    if not os.path.exists(args.save_logg_path):
+        os.makedirs(args.save_logg_path)
 
     return args

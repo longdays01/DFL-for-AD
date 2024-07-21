@@ -36,7 +36,11 @@ class Network(ABC):
         self.optimizer_name = args.optimizer
         self.lr_scheduler_name = args.decay
         self.max_round = args.n_rounds
-
+        self.alpha = args.alpha
+        self.min_degree = args.min_degree
+        self.best_rmse = float('inf')
+        self.best_round = 0
+        self.small_rmse_flag = False
         # create logger
         if args.save_logg_path == "":
             self.logger_path = os.path.join("loggs", args_to_string(args), args.architecture)
@@ -139,8 +143,51 @@ class Network(ABC):
         self.logger_write_param.write(f'\t -----: Total Time: {time.time() - self.time_start:.3f}')
 
         self.time_start_update = time.time()
+
+        if test_rmse < 0.3:
+            self.small_rmse_flag = True
+            if test_rmse < self.best_rmse:
+                self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
+                self.best_rmse = test_rmse
+                self.best_round = self.round_idx
+                self.save_models(round=self.round_idx)
+            else:
+                self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
+                self.load_models(round=self.best_round)
+
         # if not self.args.test:
         #     self.save_models(round=self.round_idx)
+
+    # def save_models(self, round):
+    #     round_path = os.path.join(self.logger_path, 'round_%s' % round)
+    #     os.makedirs(round_path, exist_ok=True)
+    #     path_global = round_path + '/model_global.pth'
+    #     model_dict = {
+    #         'round': round,
+    #         'model_state': self.global_model.net.state_dict()
+    #     }
+    #     torch.save(model_dict, path_global)
+    #     for i in range(self.n_workers):
+    #         path_silo = round_path + '/model_silo_%s.pth' % i
+    #         model_dict = {
+    #             'epoch': round,
+    #             'model_state': self.workers_models[i].net.state_dict()
+    #         }
+    #         torch.save(model_dict, path_silo)
+
+    # def load_models(self, round):
+    #     self.round_idx = round
+    #     round_path = os.path.join(self.logger_path, 'round_%s' % round)
+    #     path_global = round_path + '/model_global.pth'
+    #     print('loading %s' % path_global)
+    #     model_data = torch.load(path_global)
+    #     self.global_model.net.load_state_dict(model_data.get('model_state', model_data))
+    #     for i in range(self.n_workers):
+    #         path_silo = round_path + '/model_silo_%s.pth' % i
+    #         print('loading %s' % path_silo)
+    #         model_data = torch.load(path_silo)
+    #         self.workers_models[i].net.load_state_dict(model_data.get('model_state', model_data))
+
 
     def save_models(self, round):
         round_path = os.path.join(self.logger_path, 'round_%s' % round)
@@ -148,14 +195,19 @@ class Network(ABC):
         path_global = round_path + '/model_global.pth'
         model_dict = {
             'round': round,
-            'model_state': self.global_model.net.state_dict()
+            'model_state': self.global_model.net.state_dict(),
+            'optimizer_state': self.global_model.optimizer.state_dict(),
+            'scheduler_state': self.scheduler.state_dict(),
+            'alpha': self.alpha,
+            'round_idx': self.round_idx
         }
         torch.save(model_dict, path_global)
         for i in range(self.n_workers):
             path_silo = round_path + '/model_silo_%s.pth' % i
             model_dict = {
                 'epoch': round,
-                'model_state': self.workers_models[i].net.state_dict()
+                'model_state': self.workers_models[i].net.state_dict(),
+                'optimizer_state': self.workers_models[i].optimizer.state_dict()
             }
             torch.save(model_dict, path_silo)
 
@@ -165,12 +217,20 @@ class Network(ABC):
         path_global = round_path + '/model_global.pth'
         print('loading %s' % path_global)
         model_data = torch.load(path_global)
-        self.global_model.net.load_state_dict(model_data.get('model_state', model_data))
+        self.global_model.net.load_state_dict(model_data['model_state'])
+        self.global_model.optimizer.load_state_dict(model_data['optimizer_state'])
+        self.scheduler.load_state_dict(model_data['scheduler_state'])
+        self.alpha = model_data['alpha']
+        self.round_idx = model_data['round_idx']
         for i in range(self.n_workers):
             path_silo = round_path + '/model_silo_%s.pth' % i
             print('loading %s' % path_silo)
             model_data = torch.load(path_silo)
-            self.workers_models[i].net.load_state_dict(model_data.get('model_state', model_data))
+            self.workers_models[i].net.load_state_dict(model_data['model_state'])
+            self.workers_models[i].optimizer.load_state_dict(model_data['optimizer_state'])
+
+
+
 
     def plot_results(self):
         def plot():
@@ -286,7 +346,7 @@ class Peer2PeerNetworkABP(Network):
         self.evaluation_results = []  
         self.k = args.local_steps  # Number of local iterations
 
-        self.alpha = 0.000001  # Step size/learning rate
+        # self.alpha = 0.00002  # Step size/learning rate
         self.beta = 0.0000    # Heavy-ball momentum parameter
         self.gamma = 0.0000001   # Nesterov momentum parameter
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
@@ -388,6 +448,8 @@ class Peer2PeerNetworkABP(Network):
                 gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             gradients_list.append(gradients)        
 
+        if self.small_rmse_flag: self.log_freq = 5
+
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
             for param_idx, param in enumerate(self.global_model.net.parameters()):
@@ -396,7 +458,7 @@ class Peer2PeerNetworkABP(Network):
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
 
-        A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=4, additional_edges=2)
+        A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=self.min_degree, additional_edges=5)
 
         x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         s_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
