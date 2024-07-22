@@ -129,7 +129,7 @@ def parse_args(args_list=None):
 
     # Create dynamic results folder name
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    args.save_logg_path = f"results_{args.alpha}_lr{args.lr}_md{args.min_degree}_{timestamp}"
+    args.save_logg_path = f"results_a{args.alpha}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_d{args.decay}_{timestamp}"
     
     # Create the directory if it doesn't exist
     if not os.path.exists(args.save_logg_path):

@@ -310,7 +310,7 @@ class Peer2PeerNetwork(Network):
                                    n_epochs=self.local_steps, verbose=0)
             else:
                 model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
-                
+
         if self.rmse_flag: self.log_freq = 8
         if self.medium_rmse_flag: self.log_freq = 4
         if self.small_rmse_flag: self.log_freq = 1
@@ -508,8 +508,8 @@ class Peer2PeerNetworkABP(Network):
                 gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             gradients_list.append(gradients)        
 
-        if self.rmse_flag: self.log_freq = 8
-        if self.medium_rmse_flag: self.log_freq = 4
+        if self.rmse_flag: self.log_freq = 16
+        if self.medium_rmse_flag: self.log_freq = 8
         if self.small_rmse_flag: self.log_freq = 1
 
         # write logs
