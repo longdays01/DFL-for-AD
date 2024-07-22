@@ -310,7 +310,10 @@ class Peer2PeerNetwork(Network):
                                    n_epochs=self.local_steps, verbose=0)
             else:
                 model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
-
+                
+        if self.rmse_flag: self.log_freq = 8
+        if self.medium_rmse_flag: self.log_freq = 4
+        if self.small_rmse_flag: self.log_freq = 1
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
             for param_idx, param in enumerate(self.global_model.net.parameters()):
