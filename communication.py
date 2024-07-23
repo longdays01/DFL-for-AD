@@ -146,9 +146,9 @@ class Network(ABC):
 
         self.time_start_update = time.time()
 
-        if test_rmse < 0.3:
+        if test_rmse < 0.1:
             self.rmse_flag = True
-            if test_rmse < 0.1:
+            if test_rmse < 0.9:
                 self.medium_rmse_flag = True
                 if test_rmse < 0.07:
                     self.small_rmse_flag = True
@@ -158,6 +158,7 @@ class Network(ABC):
                 self.best_rmse = test_rmse
                 self.best_round = self.round_idx
                 self.save_models(round=self.round_idx)
+
             else:
                 self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
                 self.load_models(round=self.best_round)
@@ -261,42 +262,6 @@ class Network(ABC):
                 f.write(f"Round: {result['round']}, Avg Train Loss: {result['avg_train_loss']:.5f}, Avg Train RMSE: {result['avg_train_rmse']:.5f}, Avg Test Loss: {result['avg_test_loss']:.5f}, Avg Test RMSE: {result['avg_test_rmse']:.5f}, Evaluation Time: {result['evaluation_time']:.2f}s\n")
 
 class Peer2PeerNetwork(Network):
-    def save_models(self, round):
-        round_path = os.path.join(self.logger_path, 'round_%s' % round)
-        os.makedirs(round_path, exist_ok=True)
-        path_global = round_path + '/model_global.pth'
-        model_dict = {
-            'round': round,
-            'model_state': self.global_model.net.state_dict(),
-            'optimizer_state': self.global_model.optimizer.state_dict(),
-            'round_idx': self.round_idx
-        }
-        torch.save(model_dict, path_global)
-        for i in range(self.n_workers):
-            path_silo = round_path + '/model_silo_%s.pth' % i
-            model_dict = {
-                'epoch': round,
-                'model_state': self.workers_models[i].net.state_dict(),
-                'optimizer_state': self.workers_models[i].optimizer.state_dict()
-            }
-            torch.save(model_dict, path_silo)
-
-    def load_models(self, round):
-        self.round_idx = round
-        round_path = os.path.join(self.logger_path, 'round_%s' % round)
-        path_global = round_path + '/model_global.pth'
-        print('loading %s' % path_global)
-        model_data = torch.load(path_global)
-        self.global_model.net.load_state_dict(model_data['model_state'])
-        self.global_model.optimizer.load_state_dict(model_data['optimizer_state'])
-        self.round_idx = model_data['round_idx']
-        for i in range(self.n_workers):
-            path_silo = round_path + '/model_silo_%s.pth' % i
-            print('loading %s' % path_silo)
-            model_data = torch.load(path_silo)
-            self.workers_models[i].net.load_state_dict(model_data['model_state'])
-            self.workers_models[i].optimizer.load_state_dict(model_data['optimizer_state'])
-                
     def mix(self, write_results=True):
         """
         :param write_results:
@@ -311,9 +276,6 @@ class Peer2PeerNetwork(Network):
             else:
                 model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
 
-        if self.rmse_flag: self.log_freq = 8
-        if self.medium_rmse_flag: self.log_freq = 4
-        if self.small_rmse_flag: self.log_freq = 1
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
             for param_idx, param in enumerate(self.global_model.net.parameters()):
@@ -601,7 +563,7 @@ class Peer2PeerNetworkABP(Network):
         #     scheduler.step()
 
         # Update alpha using the scheduler
-        self.alpha = self.scheduler.step()
+        # self.alpha = self.scheduler.step()
         self.round_idx += 1
 
 
