@@ -262,11 +262,6 @@ class Network(ABC):
                 f.write(f"Round: {result['round']}, Avg Train Loss: {result['avg_train_loss']:.5f}, Avg Train RMSE: {result['avg_train_rmse']:.5f}, Avg Test Loss: {result['avg_test_loss']:.5f}, Avg Test RMSE: {result['avg_test_rmse']:.5f}, Evaluation Time: {result['evaluation_time']:.2f}s\n")
 
 class Peer2PeerNetwork(Network):
-    def mix(self, write_results=True):
-        """
-        :param write_results:
-        Mix local model parameters in a gossip fashion
-        """
     def save_models(self, round):
         round_path = os.path.join(self.logger_path, 'round_%s' % round)
         os.makedirs(round_path, exist_ok=True)
@@ -302,7 +297,12 @@ class Peer2PeerNetwork(Network):
             model_data = torch.load(path_silo)
             self.workers_models[i].net.load_state_dict(model_data['model_state'])
             self.workers_models[i].optimizer.load_state_dict(model_data['optimizer_state'])
-
+            
+    def mix(self, write_results=True):
+        """
+        :param write_results:
+        Mix local model parameters in a gossip fashion
+        """
         # update workers
         for worker_id, model in enumerate(self.workers_models):
             model.net.to(self.device)
