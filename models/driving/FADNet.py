@@ -205,7 +205,7 @@ class AttentionModule(nn.Module):
 
 class ADTVNet(nn.Module):
     def __init__(self):
-        super(FADNet_plus, self).__init__()
+        super(ADTVNet, self).__init__()
         self.conv1 = Conv2d(1, 32, (5, 5), stride=2)
         self.max_pool1 = nn.MaxPool2d((3, 3), 2)
         self.res_block1 = nn.Sequential(OrderedDict([
