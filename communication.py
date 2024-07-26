@@ -37,6 +37,8 @@ class Network(ABC):
         self.lr_scheduler_name = args.decay
         self.max_round = args.n_rounds
         self.alpha = args.alpha
+        self.beta = args.beta    # Heavy-ball momentum parameter
+        self.gamma = args.gamma   # Nesterov momentum parameter        
         self.min_degree = args.min_degree
         self.best_rmse = float('inf')
         self.best_round = 0
@@ -262,6 +264,44 @@ class Network(ABC):
                 f.write(f"Round: {result['round']}, Avg Train Loss: {result['avg_train_loss']:.5f}, Avg Train RMSE: {result['avg_train_rmse']:.5f}, Avg Test Loss: {result['avg_test_loss']:.5f}, Avg Test RMSE: {result['avg_test_rmse']:.5f}, Evaluation Time: {result['evaluation_time']:.2f}s\n")
 
 class Peer2PeerNetwork(Network):
+    def mix(self, write_results=True):
+        """
+        :param write_results:
+        Mix local model parameters in a gossip fashion
+        """        
+        # update workers
+        for worker_id, model in enumerate(self.workers_models):
+            model.net.to(self.device)
+            if self.fit_by_epoch:
+                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
+                                   n_epochs=self.local_steps, verbose=0)
+            else:
+                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
+
+        # write logs
+        if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
+            for param_idx, param in enumerate(self.global_model.net.parameters()):
+                param.data.fill_(0.)
+                for worker_model in self.workers_models:
+                    param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
+            self.write_logs()
+
+        # mix models
+        for param_idx, param in enumerate(self.global_model.net.parameters()):
+            temp_workers_param_list = [torch.zeros(param.shape).to(self.device) for _ in range(self.n_workers)]
+            for worker_id, model in enumerate(self.workers_models):
+                for neighbour in self.network.neighbors(worker_id):
+                    coeff = self.network.get_edge_data(worker_id, neighbour)["weight"]
+                    temp_workers_param_list[worker_id] += \
+                        coeff * list(self.workers_models[neighbour].net.parameters())[param_idx].data.clone()
+
+            for worker_id, model in enumerate(self.workers_models):
+                for param_idx_, param_ in enumerate(model.net.parameters()):
+                    if param_idx_ == param_idx:
+                        param_.data = temp_workers_param_list[worker_id].clone()
+
+        self.round_idx += 1
+    
     def save_models(self, round):
         round_path = os.path.join(self.logger_path, 'round_%s' % round)
         os.makedirs(round_path, exist_ok=True)
@@ -297,44 +337,6 @@ class Peer2PeerNetwork(Network):
             model_data = torch.load(path_silo)
             self.workers_models[i].net.load_state_dict(model_data['model_state'])
             self.workers_models[i].optimizer.load_state_dict(model_data['optimizer_state'])
-            
-    def mix(self, write_results=True):
-        """
-        :param write_results:
-        Mix local model parameters in a gossip fashion
-        """
-        # update workers
-        for worker_id, model in enumerate(self.workers_models):
-            model.net.to(self.device)
-            if self.fit_by_epoch:
-                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
-                                   n_epochs=self.local_steps, verbose=0)
-            else:
-                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
-
-        # write logs
-        if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
-            for param_idx, param in enumerate(self.global_model.net.parameters()):
-                param.data.fill_(0.)
-                for worker_model in self.workers_models:
-                    param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
-            self.write_logs()
-
-        # mix models
-        for param_idx, param in enumerate(self.global_model.net.parameters()):
-            temp_workers_param_list = [torch.zeros(param.shape).to(self.device) for _ in range(self.n_workers)]
-            for worker_id, model in enumerate(self.workers_models):
-                for neighbour in self.network.neighbors(worker_id):
-                    coeff = self.network.get_edge_data(worker_id, neighbour)["weight"]
-                    temp_workers_param_list[worker_id] += \
-                        coeff * list(self.workers_models[neighbour].net.parameters())[param_idx].data.clone()
-
-            for worker_id, model in enumerate(self.workers_models):
-                for param_idx_, param_ in enumerate(model.net.parameters()):
-                    if param_idx_ == param_idx:
-                        param_.data = temp_workers_param_list[worker_id].clone()
-
-        self.round_idx += 1
 
 class EarlyStopping:
     def __init__(self, patience=20, delta=0.001):
@@ -396,6 +398,9 @@ class ExponentialDecayScheduler:
 
 
 class Peer2PeerNetworkABP(Network):
+    """
+    Mix local model parameters in a gossip fashion over time-varying communication graphs.
+    """           
     def __init__(self, args):        
         super(Peer2PeerNetworkABP, self).__init__(args)
         self.train_losses = [] 
@@ -405,8 +410,8 @@ class Peer2PeerNetworkABP(Network):
         self.k = args.local_steps  # Number of local iterations
 
         # self.alpha = 0.00002  # Step size/learning rate
-        self.beta = 0.0000    # Heavy-ball momentum parameter
-        self.gamma = 0.0000001   # Nesterov momentum parameter
+        # self.beta = 0.0000    # Heavy-ball momentum parameter
+        # self.gamma = 0.0000001   # Nesterov momentum parameter
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
 
         self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
@@ -416,7 +421,7 @@ class Peer2PeerNetworkABP(Network):
         self.s = []
         self.y = []
         self.x_prev = []
-
+        self.x_diff_prev = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         # self.schedulers = []  # Store schedulers for each worker
 
         # self.early_stopping = EarlyStopping(patience=20, delta=0.001)
@@ -432,7 +437,7 @@ class Peer2PeerNetworkABP(Network):
                 x_prev_worker.append(param.clone().detach().to(self.device))
             self.s.append(s_worker)
             self.x_prev.append(x_prev_worker)
-
+            self.x_diff_prev
             # Compute the initial gradients for y
             model.net.to(self.device)
             model.net.zero_grad()
@@ -483,7 +488,7 @@ class Peer2PeerNetworkABP(Network):
             else:
                 model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
 
-    def mix(self, write_results=True):
+    def mix(self, write_results=True): 
         gradients_list = []
         for worker_id, model in enumerate(self.workers_models):
             model.net.to(self.device)
@@ -506,9 +511,9 @@ class Peer2PeerNetworkABP(Network):
                 gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             gradients_list.append(gradients)        
 
-        if self.rmse_flag: self.log_freq = 16
-        if self.medium_rmse_flag: self.log_freq = 8
-        if self.small_rmse_flag: self.log_freq = 1
+        # if self.rmse_flag: self.log_freq = 16
+        # if self.medium_rmse_flag: self.log_freq = 8
+        # if self.small_rmse_flag: self.log_freq = 1
 
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
@@ -523,6 +528,7 @@ class Peer2PeerNetworkABP(Network):
         x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         s_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         y_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        # x_diff_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         new_gradients_list = []
 
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
@@ -532,12 +538,14 @@ class Peer2PeerNetworkABP(Network):
                 for j in range(self.n_workers):
                     x_new[worker_id][param_idx] += A[worker_id, j] * self.s[j][param_idx]
                 x_new[worker_id][param_idx] -= self.alpha * self.y[worker_id][param_idx]
-                x_new[worker_id][param_idx] += self.beta / self.gamma * (self.s[worker_id][param_idx] - self.x_prev[worker_id][param_idx])
+                # x_new[worker_id][param_idx] += self.beta / self.gamma * (self.s[worker_id][param_idx] - self.x_prev[worker_id][param_idx])
+                x_new[worker_id][param_idx] += self.beta * self.x_diff_prev[worker_id][param_idx]               
+                self.x_diff_prev[worker_id][param_idx] = x_new[worker_id][param_idx] - self.x_prev[worker_id][param_idx]
 
         # Update s
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
             for worker_id, model in enumerate(self.workers_models):
-                s_new[worker_id][param_idx] = x_new[worker_id][param_idx] + self.gamma * (x_new[worker_id][param_idx] -  self.x_prev[worker_id][param_idx])
+                s_new[worker_id][param_idx] = x_new[worker_id][param_idx] + self.gamma * self.x_diff_prev[worker_id][param_idx]
                 self.x_prev[worker_id][param_idx] = x_new[worker_id][param_idx]
                 self.s[worker_id][param_idx] = s_new[worker_id][param_idx]
 
@@ -662,3 +670,31 @@ class Peer2PeerNetworkABP(Network):
             BT[i] = AdjT[i] / sumRow
         B = BT.T
         return B
+
+class CentralizedNetwork(Network):
+    def mix(self, write_results=True):
+        """
+        :param write_results:
+        All the local models are averaged, and the average model is re-assigned to each work
+        """
+        for worker_id, model in enumerate(self.workers_models):
+            model.net.to(self.device)
+            if self.fit_by_epoch:
+                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
+                                   n_epochs=self.local_steps, verbose=0)
+            else:
+                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
+
+        for param_idx, param in enumerate(self.global_model.net.parameters()):
+            param.data.fill_(0.)
+            for worker_model in self.workers_models:
+                param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
+
+        for ii, model in enumerate(self.workers_models):
+            for param_idx, param in enumerate(model.net.parameters()):
+                param.data = list(self.global_model.net.parameters())[param_idx].data.clone()
+
+        self.round_idx += 1
+
+        if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
+            self.write_logs()

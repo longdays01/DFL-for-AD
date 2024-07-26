@@ -24,9 +24,9 @@ def parse_args(args_list=None):
     )
     parser.add_argument(
         '--model',
-        choices=['FADNet', 'FADNet_plus'],
-        help='model to use, possible: FADNet, FADNet_plus',
-        default='FADNet'
+        choices=['FADNet', 'FADNet_plus', 'ADTVNet'],
+        help='model to use, possible: FADNet, FADNet_plus, ADTVNet',
+        default='ADTVNet'
     )
     parser.add_argument(
         "--random_ring_proba",
@@ -114,6 +114,18 @@ def parse_args(args_list=None):
         default=0.00001
     )
     parser.add_argument(
+        '--beta',
+        help='heavy-ball momentum parameter',
+        type=float,
+        default=0.000001
+    )
+    parser.add_argument(
+        '--gamma',
+        help='nesterov momentum parameter',
+        type=float,
+        default=0.0000001
+    )        
+    parser.add_argument(
         '--min_degree',
         help='minimum degree of the communication matrix',
         type=int,
@@ -129,7 +141,7 @@ def parse_args(args_list=None):
 
     # Create dynamic results folder name
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    args.save_logg_path = f"results_a{args.alpha}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_d{args.decay}_{timestamp}"
+    args.save_logg_path = f"results_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_d{args.decay}_{timestamp}"
     
     # Create the directory if it doesn't exist
     if not os.path.exists(args.save_logg_path):

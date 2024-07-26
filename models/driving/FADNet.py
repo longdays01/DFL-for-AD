@@ -109,83 +109,83 @@ class Conv2d(_ConvNd):
 
 # Normalize
 cuda0 = torch.device('cuda:0')
-# class FADNet_plus(nn.Module):
-#     def __init__(self):
-#         super(FADNet_plus, self).__init__()
-#         self.conv1 = Conv2d(1, 32, (5, 5), stride=2)
-#         self.max_pool1 = nn.MaxPool2d((3, 3), 2)
-#         self.res_block1 = nn.Sequential(OrderedDict([
-#             ('batch_norm', nn.BatchNorm2d(32)),
-#             ('relu', nn.ReLU()),
-#             ('conv2d', Conv2d(32, 32, (3, 3), stride=2)),
-#             ('batch_norm_1', nn.BatchNorm2d(32)),
-#             ('relu_1', nn.ReLU()),
-#             ('conv2d_2', Conv2d(32, 32, (3, 3)))
-#         ]))
-#         self.conv2 = Conv2d(32, 256, (1, 1), stride=7)
+class FADNet_plus(nn.Module):
+    def __init__(self):
+        super(FADNet_plus, self).__init__()
+        self.conv1 = Conv2d(1, 32, (5, 5), stride=2)
+        self.max_pool1 = nn.MaxPool2d((3, 3), 2)
+        self.res_block1 = nn.Sequential(OrderedDict([
+            ('batch_norm', nn.BatchNorm2d(32)),
+            ('relu', nn.ReLU()),
+            ('conv2d', Conv2d(32, 32, (3, 3), stride=2)),
+            ('batch_norm_1', nn.BatchNorm2d(32)),
+            ('relu_1', nn.ReLU()),
+            ('conv2d_2', Conv2d(32, 32, (3, 3)))
+        ]))
+        self.conv2 = Conv2d(32, 256, (1, 1), stride=7)
 
-#         self.res_block2 = nn.Sequential(OrderedDict([
-#             ('batch_norm', nn.BatchNorm2d(32)),
-#             ('relu', nn.ReLU()),
-#             ('conv2d', Conv2d(32, 64, (3, 3), stride=2)),
-#             ('batch_norm_1', nn.BatchNorm2d(64)),
-#             ('relu_1', nn.ReLU()),
-#             ('conv2d_2', Conv2d(64, 64, (3, 3)))
-#         ]))
-#         self.conv3 = Conv2d(32, 256, (1, 1), stride=4)
+        self.res_block2 = nn.Sequential(OrderedDict([
+            ('batch_norm', nn.BatchNorm2d(32)),
+            ('relu', nn.ReLU()),
+            ('conv2d', Conv2d(32, 64, (3, 3), stride=2)),
+            ('batch_norm_1', nn.BatchNorm2d(64)),
+            ('relu_1', nn.ReLU()),
+            ('conv2d_2', Conv2d(64, 64, (3, 3)))
+        ]))
+        self.conv3 = Conv2d(32, 256, (1, 1), stride=4)
 
-#         self.res_block3 = nn.Sequential(OrderedDict([
-#             ('batch_norm', nn.BatchNorm2d(64)),
-#             ('relu', nn.ReLU()),
-#             ('conv2d', Conv2d(64, 128, (3, 3), stride=2)),
-#             ('batch_norm_1', nn.BatchNorm2d(128)),
-#             ('relu_1', nn.ReLU()),
-#             ('conv2d_2', Conv2d(128, 128, (3, 3)))
-#         ]))
-#         self.conv4 = Conv2d(64, 256, (1, 1), stride=2)
-#         self.dropout = nn.Dropout2d(p=0.5)
-#         self.relu = nn.ReLU()
+        self.res_block3 = nn.Sequential(OrderedDict([
+            ('batch_norm', nn.BatchNorm2d(64)),
+            ('relu', nn.ReLU()),
+            ('conv2d', Conv2d(64, 128, (3, 3), stride=2)),
+            ('batch_norm_1', nn.BatchNorm2d(128)),
+            ('relu_1', nn.ReLU()),
+            ('conv2d_2', Conv2d(128, 128, (3, 3)))
+        ]))
+        self.conv4 = Conv2d(64, 256, (1, 1), stride=2)
+        self.dropout = nn.Dropout2d(p=0.5)
+        self.relu = nn.ReLU()
 
-#         self.fc_feature = nn.Linear(3, 1)
-#         self.fc = nn.Linear(FEATURE_SIZE, NUMBER_CLASSES)
+        self.fc_feature = nn.Linear(3, 1)
+        self.fc = nn.Linear(FEATURE_SIZE, NUMBER_CLASSES)
 
-#     def forward(self, inputs):
-#         x1 = inputs
-#         x1 = self.conv1(x1)
-#         x1 = self.max_pool1(x1)
+    def forward(self, inputs):
+        x1 = inputs
+        x1 = self.conv1(x1)
+        x1 = self.max_pool1(x1)
 
-#         x2 = self.res_block1(x1)
+        x2 = self.res_block1(x1)
 
-#         f1 = self.conv2(x1)
-#         f1 = f1.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-#         # GAP support feature 1
-#         f1 = f1.mean(axis=-1)
+        f1 = self.conv2(x1)
+        f1 = f1.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
+        # GAP support feature 1
+        f1 = f1.mean(axis=-1)
 
-#         x3 = self.res_block2(x2)
+        x3 = self.res_block2(x2)
 
-#         f2 = self.conv3(x2)
-#         f2 = f2.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-#         # GAP support feature 2
-#         f2 = f2.mean(axis=-1)
+        f2 = self.conv3(x2)
+        f2 = f2.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
+        # GAP support feature 2
+        f2 = f2.mean(axis=-1)
 
-#         x4 = self.res_block3(x3)
+        x4 = self.res_block3(x3)
 
-#         f3 = self.conv4(x3)
-#         f3 = f3.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-#         # GAP support feature 3
-#         f3 = f3.mean(axis=-1)
+        f3 = self.conv4(x3)
+        f3 = f3.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
+        # GAP support feature 3
+        f3 = f3.mean(axis=-1)
 
-#         x4 = self.relu(x4)
-#         x4 = self.dropout(x4)
-#         x4 = x4.view(inputs.shape[0], -1)
+        x4 = self.relu(x4)
+        x4 = self.dropout(x4)
+        x4 = x4.view(inputs.shape[0], -1)
 
-#         # Support feature Accumulation
-#         x_feature = self.fc_feature(torch.stack([f1, f2, f3], axis=2)).squeeze(-1)
+        # Support feature Accumulation
+        x_feature = self.fc_feature(torch.stack([f1, f2, f3], axis=2)).squeeze(-1)
 
-#         # Aggregation with hadamard product
-#         x_final = torch.mul(x4, x_feature)
-#         # prediction
-#         return self.fc(x_final)
+        # Aggregation with hadamard product
+        x_final = torch.mul(x4, x_feature)
+        # prediction
+        return self.fc(x_final)
 
 
 class AttentionModule(nn.Module):
@@ -203,7 +203,7 @@ class AttentionModule(nn.Module):
         attention_weights = self.attention(x)
         return x * attention_weights
 
-class FADNet_plus(nn.Module):
+class ADTVNet(nn.Module):
     def __init__(self):
         super(FADNet_plus, self).__init__()
         self.conv1 = Conv2d(1, 32, (5, 5), stride=2)
@@ -379,8 +379,10 @@ class DrivingNet(Model):
         super(DrivingNet, self).__init__()
         if model == "FADNet":
             self.net = FADNet().to(device)
-        else:
+        elif model == "FADNet_plus":
             self.net = FADNet_plus().to(device)
+        else: self.net = ADTVNet().to(device)
+    
         self.criterion = criterion
         self.metric = metric
         self.device = device
