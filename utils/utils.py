@@ -11,7 +11,7 @@ from utils.metrics import RMSE
 
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-from models.driving.FADNet import DrivingNet
+from models.driving.TVNet import DrivingNet
 from loaders.driving import get_iterator_driving
 from loaders.complex_driving import get_iterator_complex_driving
 import functools
