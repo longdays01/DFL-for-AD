@@ -53,6 +53,18 @@ def parse_args(args_list=None):
         default=32
     )
     parser.add_argument(
+        '--n_workers',
+        help='number of worker nodes;',
+        type=int,
+        default=11
+    )    
+    parser.add_argument(
+        '--poisson_rate',
+        help='poisson rate for number of disconnected nodes;',
+        type=int,
+        default=0
+    )        
+    parser.add_argument(
         '--local_steps',
         help='number of local steps before communication;',
         type=int,

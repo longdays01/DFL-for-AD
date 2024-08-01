@@ -45,6 +45,7 @@ class Network(ABC):
         self.rmse_flag = False
         self.small_rmse_flag = False
         self.medium_rmse_flag = False
+        self.disconnected_nodes_count = 0   
         # create logger
         if args.save_logg_path == "":
             self.logger_path = os.path.join("loggs", args_to_string(args), args.architecture)
@@ -148,23 +149,40 @@ class Network(ABC):
 
         self.time_start_update = time.time()
 
-        if test_rmse < 0.1:
-            self.rmse_flag = True
-            if test_rmse < 0.9:
-                self.medium_rmse_flag = True
-                if test_rmse < 0.07:
-                    self.small_rmse_flag = True
+        if self.args.experiment == "driving_gazebo":
+            if test_rmse < 0.1:
+                self.rmse_flag = True
+                if test_rmse < 0.9:
+                    self.medium_rmse_flag = True
+                    if test_rmse < 0.07:
+                        self.small_rmse_flag = True
 
-            if test_rmse < self.best_rmse:
-                self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                self.best_rmse = test_rmse
-                self.best_round = self.round_idx
-                self.save_models(round=self.round_idx)
+                if test_rmse < self.best_rmse:
+                    self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
+                    self.best_rmse = test_rmse
+                    self.best_round = self.round_idx
+                    self.save_models(round=self.round_idx)
 
-            else:
-                self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
-                self.load_models(round=self.best_round)
+                else:
+                    self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
+                    self.load_models(round=self.best_round)
+        else: 
+            if test_rmse < 0.22:
+                self.rmse_flag = True
+                if test_rmse < 0.21:
+                    self.medium_rmse_flag = True
+                    if test_rmse < 0.205:
+                        self.small_rmse_flag = True
 
+                if test_rmse < self.best_rmse:
+                    self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
+                    self.best_rmse = test_rmse
+                    self.best_round = self.round_idx
+                    self.save_models(round=self.round_idx)
+
+                else:
+                    self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
+                    self.load_models(round=self.best_round)            
         # if not self.args.test:
         #     self.save_models(round=self.round_idx)
 
@@ -400,122 +418,83 @@ class ExponentialDecayScheduler:
 class Peer2PeerNetworkABP(Network):
     """
     Mix local model parameters in a gossip fashion over time-varying communication graphs.
-    """           
-    def __init__(self, args):        
+    """
+    def __init__(self, args):
         super(Peer2PeerNetworkABP, self).__init__(args)
-        self.train_losses = [] 
+        self.train_losses = []
         self.test_losses = []
-        self.rounds = []  
-        self.evaluation_results = []  
+        self.rounds = []
+        self.evaluation_results = []
         self.k = args.local_steps  # Number of local iterations
-
-        # self.alpha = 0.00002  # Step size/learning rate
-        # self.beta = 0.0000    # Heavy-ball momentum parameter
-        # self.gamma = 0.0000001   # Nesterov momentum parameter
+        self.n_workers = args.n_workers
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
+        self.poisson_rate = args.poisson_rate
+        self.disconnected_nodes_count = 0  # Track the number of disconnected nodes
 
         self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
-        
         self.stop_criterion = False
 
+        # Initialize s, y, x_prev, and x_diff_prev for each worker
         self.s = []
         self.y = []
         self.x_prev = []
         self.x_diff_prev = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
-        # self.schedulers = []  # Store schedulers for each worker
 
-        # self.early_stopping = EarlyStopping(patience=20, delta=0.001)
-
+        # Initialize s, x_prev, and y for each worker
         for worker_id, model in enumerate(self.workers_models):
-            s_worker = []
-            y_worker = []
-            x_prev_worker = []
+            s_worker, y_worker, x_prev_worker = [], [], []
 
             # Initialize s and x_prev with the model parameters
             for param in model.net.parameters():
                 s_worker.append(param.clone().detach().to(self.device))
                 x_prev_worker.append(param.clone().detach().to(self.device))
+
             self.s.append(s_worker)
             self.x_prev.append(x_prev_worker)
-            self.x_diff_prev
+
             # Compute the initial gradients for y
             model.net.to(self.device)
             model.net.zero_grad()
             x, y = next(iter(self.workers_iterators[worker_id]))
-            x = x.to(self.device, dtype=torch.float)
-            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            x, y = x.to(self.device, dtype=torch.float), y.to(self.device, dtype=torch.float).unsqueeze(-1)
             predictions = model.net(x)
             loss = model.criterion(predictions, y)
             loss.backward()
 
-            # Apply gradient clipping
-            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
-
+            # Store the gradients in y_worker
             for param in model.net.parameters():
                 y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             self.y.append(y_worker)
 
-            # # Create and store a scheduler for each worker's optimizer
-            # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model.optimizer, 'min', patience=10, factor=0.5)
-            # self.schedulers.append(scheduler)
-
-    def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
-        rng = np.random.default_rng()
-
-        adj_matrix_A = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges)
-        adj_matrix_B = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges)
-        
-        A = self.getArow(adj_matrix_A)
-        B = self.getBcol(adj_matrix_B)
-        
-        return A, B
-
     def local_updates(self, worker_id):
+        """Perform local updates for a specific worker."""
         model = self.workers_models[worker_id]
         model.net.to(self.device)
-        for _ in range(self.k):
-        #     model.net.zero_grad()
-        #     x, y = next(iter(self.workers_iterators[worker_id]))
-        #     x = x.to(self.device, dtype=torch.float)
-        #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
-        #     predictions = model.net(x)
-        #     loss = model.criterion(predictions, y)
-        #     loss.backward()
-        #     model.optimizer.step()
-            if self.fit_by_epoch:
-                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
-                                    n_epochs=self.local_steps, verbose=0)
-            else:
-                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
+        if self.fit_by_epoch:
+            model.fit_iterator(train_iterator=self.workers_iterators[worker_id], n_epochs=self.local_steps, verbose=0)
+        else:
+            model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
 
-    def mix(self, write_results=True): 
+    def mix(self, write_results=True):
+        """Mix model parameters using communication matrices."""
         gradients_list = []
+
+        # Perform local updates and compute gradients for each worker
         for worker_id, model in enumerate(self.workers_models):
             model.net.to(self.device)
-            self.local_updates(worker_id)  # Perform local updates for k iterations
+            self.local_updates(worker_id)
 
-            # Get gradients after local updates
             model.net.zero_grad()
             x, y = next(iter(self.workers_iterators[worker_id]))
-            x = x.to(self.device, dtype=torch.float)
-            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            x, y = x.to(self.device, dtype=torch.float), y.to(self.device, dtype=torch.float).unsqueeze(-1)
             predictions = model.net(x)
             loss = model.criterion(predictions, y)
             loss.backward()
-            
-            # Apply gradient clipping
-            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
 
-            gradients = []
-            for param in model.net.parameters():
-                gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
-            gradients_list.append(gradients)        
+            gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
+            gradients_list.append(gradients)
 
-        # if self.rmse_flag: self.log_freq = 16
-        # if self.medium_rmse_flag: self.log_freq = 8
-        # if self.small_rmse_flag: self.log_freq = 1
-
-        # write logs
+        # Write logs periodically
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
             for param_idx, param in enumerate(self.global_model.net.parameters()):
                 param.data.fill_(0.)
@@ -523,26 +502,25 @@ class Peer2PeerNetworkABP(Network):
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
 
+        # Generate communication matrices
         A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=self.min_degree, additional_edges=5)
 
         x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         s_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         y_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
-        # x_diff_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         new_gradients_list = []
 
+        # Update x for each parameter and worker
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
             for worker_id, model in enumerate(self.workers_models):
-                # Update x
                 x_new[worker_id][param_idx] = torch.zeros_like(list(model.net.parameters())[param_idx])
                 for j in range(self.n_workers):
                     x_new[worker_id][param_idx] += A[worker_id, j] * self.s[j][param_idx]
                 x_new[worker_id][param_idx] -= self.alpha * self.y[worker_id][param_idx]
-                # x_new[worker_id][param_idx] += self.beta / self.gamma * (self.s[worker_id][param_idx] - self.x_prev[worker_id][param_idx])
-                x_new[worker_id][param_idx] += self.beta * self.x_diff_prev[worker_id][param_idx]               
+                x_new[worker_id][param_idx] += self.beta * self.x_diff_prev[worker_id][param_idx]
                 self.x_diff_prev[worker_id][param_idx] = x_new[worker_id][param_idx] - self.x_prev[worker_id][param_idx]
 
-        # Update s
+        # Update s for each parameter and worker
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
             for worker_id, model in enumerate(self.workers_models):
                 s_new[worker_id][param_idx] = x_new[worker_id][param_idx] + self.gamma * self.x_diff_prev[worker_id][param_idx]
@@ -554,122 +532,117 @@ class Peer2PeerNetworkABP(Network):
             for param_idx, param in enumerate(model.net.parameters()):
                 param.data = s_new[worker_id][param_idx].data
             model.net.to(self.device)
-            # Get new gradients after update
             model.net.zero_grad()
             x, y = next(iter(self.workers_iterators[worker_id]))
-            x = x.to(self.device, dtype=torch.float)
-            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            x, y = x.to(self.device, dtype=torch.float), y.to(self.device, dtype=torch.float).unsqueeze(-1)
             predictions = model.net(x)
             loss = model.criterion(predictions, y)
             loss.backward()
 
-            # Apply gradient clipping
-            # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
-            
-
-            new_gradients = []
-            for param in model.net.parameters():
-                new_gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
+            new_gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device)]
             new_gradients_list.append(new_gradients)
 
+        # Update y for each parameter and worker
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
             for worker_id, model in enumerate(self.workers_models):
-                # Calculate the gradient difference
                 diff_grad = new_gradients_list[worker_id][param_idx] - gradients_list[worker_id][param_idx]
-
-                # print(f"Worker {worker_id} - Param {param_idx} - Shape of gradient: {gradients_list[worker_id][param_idx].shape}")
-                # print(f"Worker {worker_id} - Param {param_idx} - Shape of new gradient: {new_gradients_list[worker_id][param_idx].shape}")
-
-                # Update y
                 y_new[worker_id][param_idx] = torch.zeros_like(self.y[worker_id][param_idx])
                 for j in range(self.n_workers):
                     y_new[worker_id][param_idx] += B[j, worker_id] * self.y[j][param_idx]
                 y_new[worker_id][param_idx] += diff_grad
-                
-                # Update stored values
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
-                # Plot results after evaluation
 
-        # if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.max_round:
-        #     # if not self.args.test:
-        #     self.save_models(round=self.round_idx)
-        #     self.plot_results()
-
-        # Check early stopping criteria
-        # val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)
-        # self.early_stopping(val_loss, self.global_model, self.round_idx, self)
-        # if self.early_stopping.early_stop:
-        #     print("Early stopping")
-        #     return
-
-        # Update learning rate schedulers
-        # for scheduler in self.schedulers:
-        #     scheduler.step()
-
-        # Update alpha using the scheduler
-        # self.alpha = self.scheduler.step()
         self.round_idx += 1
 
+    def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
+        """Generate communication matrices A and B."""
+        rng = np.random.default_rng()
+        adj_matrix_A, disconnected_nodes_A = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges, poisson_rate=self.poisson_rate)
+        adj_matrix_B, disconnected_nodes_B = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges, poisson_rate=self.poisson_rate)
+        self.disconnected_nodes_count = (len(disconnected_nodes_A) + len(disconnected_nodes_B)) / 2
 
-    # Generate the Adjacency matrix
-    def getAdjMat(self, rng, n, min_degree, additional_edges=5):
+        A = self.getArow(adj_matrix_A)
+        B = self.getBcol(adj_matrix_B)
+
+        return A, B
+
+    def getAdjMat(self, rng, n, min_degree, additional_edges=5, poisson_rate=0):
+        """Generate an adjacency matrix with potential disconnected nodes."""
         Adj = np.zeros((n, n))
         if n == 1:
             Adj[0][0] = 1
-            return Adj
+            return Adj, []
+
         rng = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(1610925)))
+        num_disconnected_nodes = rng.poisson(poisson_rate)
+        disconnected_nodes = rng.choice(n, num_disconnected_nodes, replace=False) if num_disconnected_nodes < n else []
 
-        # Ensure each node has a self-loop
-        np.fill_diagonal(Adj, 1)
-
-        # Add initial random edges to ensure strong connectivity
         for i in range(n):
+            if i not in disconnected_nodes:
+                Adj[i, i] = 1
+
+        non_disconnected_nodes = [i for i in range(n) if i not in disconnected_nodes]
+        for i in non_disconnected_nodes:
             for _ in range(min_degree):
-                j = rng.randint(0, n)
+                j = rng.choice(non_disconnected_nodes)
                 if i != j:
                     Adj[i][j] = 1
 
-        # Ensure the graph is strongly connected
-        while not self.is_strongly_connected(Adj):
-            i = rng.randint(0, n)
-            j = rng.randint(0, n)
+        while not self.is_strongly_connected(Adj, non_disconnected_nodes):
+            i = rng.choice(non_disconnected_nodes)
+            j = rng.choice(non_disconnected_nodes)
             if i != j:
                 Adj[i][j] = 1
 
-        # Add additional random edges to increase density
         for _ in range(additional_edges):
-            i = rng.randint(0, n)
-            j = rng.randint(0, n)
+            i = rng.choice(non_disconnected_nodes)
+            j = rng.choice(non_disconnected_nodes)
             if i != j:
                 Adj[i][j] = 1
 
-        return Adj
+        for node in disconnected_nodes:
+            Adj[node, :] = 0
+            Adj[:, node] = 0
 
-    # Check if the graph is strongly connected
-    def is_strongly_connected(self, adj_matrix):
-        graph = csr_matrix(adj_matrix)
-        n_components, labels = connected_components(csgraph=graph, directed=True, connection='strong')
+        return Adj, disconnected_nodes
+
+    def is_strongly_connected(self, adj_matrix, nodes):
+        """Check if the graph is strongly connected."""
+        subgraph = adj_matrix[nodes, :][:, nodes]
+        graph = csr_matrix(subgraph)
+        n_components, _ = connected_components(csgraph=graph, directed=True, connection='strong')
         return n_components == 1
 
-    # Get the Weight matrix A (row-stochastic)
     def getArow(self, Adj):
+        """Get the row-stochastic weight matrix A."""
         A = Adj.copy()
         n = len(Adj)
         for i in range(n):
             sumRow = np.sum(Adj[i])
-            A[i] = Adj[i] / sumRow
+            if sumRow > 0:
+                A[i] = Adj[i] / sumRow
+            else:
+                A[i, i] = 1.0  # Self-loop
         return A
 
-    # Get the Weight matrix B (column-stochastic)
     def getBcol(self, Adj):
+        """Get the column-stochastic weight matrix B."""
         AdjT = Adj.T
         BT = AdjT.copy()
         n = len(AdjT)
         for i in range(n):
             sumRow = np.sum(AdjT[i])
-            BT[i] = AdjT[i] / sumRow
-        B = BT.T
-        return B
+            if sumRow > 0:
+                BT[i] = AdjT[i] / sumRow
+            else:
+                BT[i, i] = 1.0  # Self-loop
+        return BT.T
+
+    def write_logs(self):
+        """Write train/test loss, accuracy, and consensus logs."""
+        super().write_logs()
+        self.logger.add_scalar("Disconnected Nodes", self.disconnected_nodes_count, self.round_idx)
+        self.logger_write_param.write(f'\t -----: Disconnected Nodes: {self.disconnected_nodes_count}')
 
 class CentralizedNetwork(Network):
     def mix(self, write_results=True):
@@ -698,3 +671,39 @@ class CentralizedNetwork(Network):
 
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
             self.write_logs()
+
+    def save_models(self, round):
+        round_path = os.path.join(self.logger_path, 'round_%s' % round)
+        os.makedirs(round_path, exist_ok=True)
+        path_global = round_path + '/model_global.pth'
+        model_dict = {
+            'round': round,
+            'model_state': self.global_model.net.state_dict(),
+            'optimizer_state': self.global_model.optimizer.state_dict(),
+            'round_idx': self.round_idx
+        }
+        torch.save(model_dict, path_global)
+        for i in range(self.n_workers):
+            path_silo = round_path + '/model_silo_%s.pth' % i
+            model_dict = {
+                'epoch': round,
+                'model_state': self.workers_models[i].net.state_dict(),
+                'optimizer_state': self.workers_models[i].optimizer.state_dict()
+            }
+            torch.save(model_dict, path_silo)
+
+    def load_models(self, round):
+        self.round_idx = round
+        round_path = os.path.join(self.logger_path, 'round_%s' % round)
+        path_global = round_path + '/model_global.pth'
+        print('loading %s' % path_global)
+        model_data = torch.load(path_global)
+        self.global_model.net.load_state_dict(model_data['model_state'])
+        self.global_model.optimizer.load_state_dict(model_data['optimizer_state'])
+        self.round_idx = model_data['round_idx']
+        for i in range(self.n_workers):
+            path_silo = round_path + '/model_silo_%s.pth' % i
+            print('loading %s' % path_silo)
+            model_data = torch.load(path_silo)
+            self.workers_models[i].net.load_state_dict(model_data['model_state'])
+            self.workers_models[i].optimizer.load_state_dict(model_data['optimizer_state'])
