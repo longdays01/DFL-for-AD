@@ -6,7 +6,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 from utils.utils import get_network, get_iterator, get_model, args_to_string, EXTENSIONS, logger_write_params, print_model
 import time
-
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -14,6 +13,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse import csr_matrix
 import matplotlib.pyplot as plt
 import threading
+from tqdm import tqdm
 
 class Network(ABC):
     def __init__(self, args):
@@ -45,7 +45,9 @@ class Network(ABC):
         self.rmse_flag = False
         self.small_rmse_flag = False
         self.medium_rmse_flag = False
-        self.disconnected_nodes_count = 0   
+        self.disconnected_nodes_count = 0  
+        self.reload = args.reload 
+        self.best_rmse_arr = []
         # create logger
         if args.save_logg_path == "":
             self.logger_path = os.path.join("loggs", args_to_string(args), args.architecture)
@@ -149,73 +151,43 @@ class Network(ABC):
 
         self.time_start_update = time.time()
 
-        if self.args.experiment == "driving_gazebo":
-            if test_rmse < 0.1:
-                self.rmse_flag = True
-                if test_rmse < 0.9:
-                    self.medium_rmse_flag = True
-                    if test_rmse < 0.07:
-                        self.small_rmse_flag = True
+        if self.reload:
+            if self.args.experiment == "driving_gazebo":
+                if test_rmse < 0.07:
+                    self.rmse_flag = True
+                    if test_rmse < 0.065:
+                        self.medium_rmse_flag = True
+                        if test_rmse < 0.06:
+                            self.small_rmse_flag = True
 
-                if test_rmse < self.best_rmse:
-                    self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                    self.best_rmse = test_rmse
-                    self.best_round = self.round_idx
-                    self.save_models(round=self.round_idx)
+                    if test_rmse < self.best_rmse:
+                        self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
+                        self.best_rmse = test_rmse
+                        self.best_round = self.round_idx
+                        self.save_models(round=self.round_idx)
+                        self.best_rmse_arr.append(test_rmse)
+                    else:
+                        self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
+                        self.load_models(round=self.best_round)
+            else: 
+                if test_rmse < 0.215:
+                    self.rmse_flag = True
+                    if test_rmse < 0.21:
+                        self.medium_rmse_flag = True
+                        if test_rmse < 0.205:
+                            self.small_rmse_flag = True
 
-                else:
-                    self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
-                    self.load_models(round=self.best_round)
-        else: 
-            if test_rmse < 0.22:
-                self.rmse_flag = True
-                if test_rmse < 0.21:
-                    self.medium_rmse_flag = True
-                    if test_rmse < 0.205:
-                        self.small_rmse_flag = True
-
-                if test_rmse < self.best_rmse:
-                    self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                    self.best_rmse = test_rmse
-                    self.best_round = self.round_idx
-                    self.save_models(round=self.round_idx)
-
-                else:
-                    self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
-                    self.load_models(round=self.best_round)            
+                    if test_rmse < self.best_rmse:
+                        self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
+                        self.best_rmse = test_rmse
+                        self.best_round = self.round_idx
+                        self.save_models(round=self.round_idx)
+                        self.best_rmse_arr.append(test_rmse)
+                    else:
+                        self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
+                        self.load_models(round=self.best_round)           
         # if not self.args.test:
         #     self.save_models(round=self.round_idx)
-
-    # def save_models(self, round):
-    #     round_path = os.path.join(self.logger_path, 'round_%s' % round)
-    #     os.makedirs(round_path, exist_ok=True)
-    #     path_global = round_path + '/model_global.pth'
-    #     model_dict = {
-    #         'round': round,
-    #         'model_state': self.global_model.net.state_dict()
-    #     }
-    #     torch.save(model_dict, path_global)
-    #     for i in range(self.n_workers):
-    #         path_silo = round_path + '/model_silo_%s.pth' % i
-    #         model_dict = {
-    #             'epoch': round,
-    #             'model_state': self.workers_models[i].net.state_dict()
-    #         }
-    #         torch.save(model_dict, path_silo)
-
-    # def load_models(self, round):
-    #     self.round_idx = round
-    #     round_path = os.path.join(self.logger_path, 'round_%s' % round)
-    #     path_global = round_path + '/model_global.pth'
-    #     print('loading %s' % path_global)
-    #     model_data = torch.load(path_global)
-    #     self.global_model.net.load_state_dict(model_data.get('model_state', model_data))
-    #     for i in range(self.n_workers):
-    #         path_silo = round_path + '/model_silo_%s.pth' % i
-    #         print('loading %s' % path_silo)
-    #         model_data = torch.load(path_silo)
-    #         self.workers_models[i].net.load_state_dict(model_data.get('model_state', model_data))
-
 
     def save_models(self, round):
         round_path = os.path.join(self.logger_path, 'round_%s' % round)
@@ -441,6 +413,18 @@ class Peer2PeerNetworkABP(Network):
         self.x_diff_prev = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
 
         # Initialize s, x_prev, and y for each worker
+        # for worker_id, model in enumerate(self.workers_models):
+        #     self.s.append([param.clone().detach().to(self.device) for param in model.net.parameters()])
+        #     self.x_prev.append([param.clone().detach().to(self.device) for param in model.net.parameters()])
+            # gradients = model.compute_gradients(self.workers_iterators[worker_id], self.device)
+
+            # self.y.append([grad.clone().detach().to(self.device) if grad is not None else torch.zeros_like(grad).to(self.device) for grad in gradients])
+
+            # for param in model.net.parameters():
+            #     y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
+            # self.y.append(y_worker)
+
+        # Initialize s, x_prev, and y for each worker
         for worker_id, model in enumerate(self.workers_models):
             s_worker, y_worker, x_prev_worker = [], [], []
 
@@ -473,8 +457,14 @@ class Peer2PeerNetworkABP(Network):
         if self.fit_by_epoch:
             model.fit_iterator(train_iterator=self.workers_iterators[worker_id], n_epochs=self.local_steps, verbose=0)
         else:
-            model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
-
+            batch_loss, batch_acc, batch_gradients = model.fit_batches(
+                iterator=self.workers_iterators[worker_id], 
+                n_steps=self.local_steps
+            )
+            if ((self.round_idx - 1) % self.log_freq == 0):
+                print(f"Worker {worker_id}: Batch Loss: {batch_loss}, Batch Accuracy: {batch_acc}")
+        return batch_gradients
+    
     def mix(self, write_results=True):
         """Mix model parameters using communication matrices."""
         gradients_list = []
@@ -482,16 +472,16 @@ class Peer2PeerNetworkABP(Network):
         # Perform local updates and compute gradients for each worker
         for worker_id, model in enumerate(self.workers_models):
             model.net.to(self.device)
-            self.local_updates(worker_id)
+            gradients = self.local_updates(worker_id)
+            # for x, y in self.workers_iterators[worker_id]:
+            #     self.optimizer.zero_grad()
+            #     x = x.to(self.device, dtype=torch.float)
+            #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            #     predictions = model.net(x)
+            #     loss = model.criterion(predictions, y)
+            #     loss.backward()
 
-            model.net.zero_grad()
-            x, y = next(iter(self.workers_iterators[worker_id]))
-            x, y = x.to(self.device, dtype=torch.float), y.to(self.device, dtype=torch.float).unsqueeze(-1)
-            predictions = model.net(x)
-            loss = model.criterion(predictions, y)
-            loss.backward()
-
-            gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
+            # gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
             gradients_list.append(gradients)
 
         # Write logs periodically
@@ -501,6 +491,12 @@ class Peer2PeerNetworkABP(Network):
                 for worker_model in self.workers_models:
                     param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
             self.write_logs()
+            
+        if self.rmse_flag: self.local_steps = 6
+        if self.medium_rmse_flag: self.local_steps = 8
+        if self.small_rmse_flag: 
+            self.local_steps = 10
+            self.batch_size_train = 64
 
         # Generate communication matrices
         A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=self.min_degree, additional_edges=5)
@@ -553,7 +549,7 @@ class Peer2PeerNetworkABP(Network):
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
 
         self.round_idx += 1
-
+        
     def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
         """Generate communication matrices A and B."""
         rng = np.random.default_rng()

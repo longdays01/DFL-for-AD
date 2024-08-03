@@ -2,6 +2,7 @@ import os
 import argparse
 from datetime import datetime
 from utils.utils import get_network
+import pytz  # Import the pytz library
 
 def parse_args(args_list=None):
     parser = argparse.ArgumentParser()
@@ -24,8 +25,8 @@ def parse_args(args_list=None):
     )
     parser.add_argument(
         '--model',
-        choices=['FADNet', 'FADNet_plus', 'ADTVNet'],
-        help='model to use, possible: FADNet, FADNet_plus, ADTVNet',
+        choices=['FADNet_plus', 'ADTVNet'],
+        help='model to use, possible: FADNet_plus, ADTVNet',
         default='ADTVNet'
     )
     parser.add_argument(
@@ -40,6 +41,11 @@ def parse_args(args_list=None):
              ' otherwise each local step corresponds to one gradient step',
         action='store_true'
     )
+    parser.add_argument(
+        '--reload',
+        help='if chosen reload and retrain',
+        action='store_true'
+    )    
     parser.add_argument(
         '--n_rounds',
         help='number of communication rounds;',
@@ -95,6 +101,12 @@ def parse_args(args_list=None):
         default=1e-3
     )
     parser.add_argument(
+        "--threshold",
+        type=float,
+        help='threshold criteria',
+        default=1e-3
+    )
+    parser.add_argument(
         "--decay",
         help='learning rate decay scheme to be used;'
              ' possible are "cyclic", "sqrt", "linear" and "constant"(no learning rate decay);'
@@ -143,6 +155,12 @@ def parse_args(args_list=None):
         type=int,
         default=5
     )
+    parser.add_argument(
+        '--network_type',
+        choices=['Peer2PeerNetwork', 'Peer2PeerNetworkABP, CentralizedNetwork'],
+        help='Type of network to use; possible: Peer2PeerNetwork, Peer2PeerNetworkABP, CentralizedNetwork',
+        default='Peer2PeerNetworkABP'
+    )
     if args_list:
         args = parser.parse_args(args_list)
     else:
@@ -151,9 +169,12 @@ def parse_args(args_list=None):
     network = get_network(args.network_name, args.architecture, args.experiment)
     args.num_workers = network.number_of_nodes()
 
-    # Create dynamic results folder name
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    args.save_logg_path = f"results_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_d{args.decay}_{timestamp}"
+    # Get the current time in Arizona timezone
+    arizona_tz = pytz.timezone('US/Arizona')
+    timestamp = datetime.now(arizona_tz).strftime("%Y%m%d-%H%M%S")
+    
+    # Create dynamic results folder name with Arizona timestamp
+    args.save_logg_path = f"{timestamp}_{args.network_type}_{args.experiment}_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_bz{args.bz_train}_n{args.n_workers}_nrounds{args.n_rounds}_poisson{args.poisson_rate}_threshold{args.threshold}"
     
     # Create the directory if it doesn't exist
     if not os.path.exists(args.save_logg_path):

@@ -43,11 +43,11 @@ class Model(ABC):
         global_acc = 0
 
         for step in range(n_steps):
-            batch_loss, batch_acc = self.fit_batch(iterator)
+            batch_loss, batch_acc, batch_gradients = self.fit_batch(iterator)
             global_loss += batch_loss
             global_acc += batch_acc
 
-        return global_loss / n_steps, global_acc / n_steps
+        return global_loss / n_steps, global_acc / n_steps, batch_gradients
 
     def fit_iterator(self, train_iterator, val_iterator=None, n_epochs=1, path=None, verbose=0):
         best_valid_loss = float('inf')

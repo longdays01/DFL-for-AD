@@ -343,9 +343,7 @@ class DrivingNet(Model):
     def __init__(self, model, criterion, metric, device,
                  optimizer_name="adam", lr_scheduler="sqrt", initial_lr=1e-3, epoch_size=1):
         super(DrivingNet, self).__init__()
-        if model == "FADNet":
-            self.net = FADNet().to(device)
-        elif model == "FADNet_plus":
+        if model == "FADNet_plus":
             self.net = FADNet_plus().to(device)
         else: self.net = ADTVNet().to(device)
     
@@ -395,7 +393,6 @@ class DrivingNet(Model):
         predictions = self.net(x)
 
         loss = self.criterion(predictions, y)
-
         acc = self.metric[0](predictions, y)
 
         loss.backward()
@@ -406,8 +403,13 @@ class DrivingNet(Model):
 
         batch_loss = loss.item()
         batch_acc = acc.item()
+        # Collect gradients for each parameter
+        batch_gradients = [
+            param.grad.clone().detach() if param.grad is not None else torch.zeros_like(param)
+            for param in self.net.parameters()
+        ]
 
-        return batch_loss, batch_acc
+        return batch_loss, batch_acc, batch_gradients
 
     def evaluate_iterator(self, iterator):
         epoch_loss = 0
@@ -429,7 +431,29 @@ class DrivingNet(Model):
 
         return epoch_loss / len(iterator), epoch_acc / len(iterator)
 
+    # def compute_gradients(self, data_iterator, device):
+    #     self.net.eval()  
+    #     gradients = [torch.zeros_like(param) for param in self.net.parameters()]
 
+    #     with torch.no_grad():  
+    #         for i, (x, y) in enumerate(tqdm.tqdm(data_iterator)):
+    #             x = x.to(device, dtype=torch.float)
+    #             y = y.to(device, dtype=torch.float).unsqueeze(-1)
+
+    #             self.net.zero_grad()
+
+    #             predictions = self.net(x)
+    #             loss = self.criterion(predictions, y)
+
+    #             with torch.enable_grad():
+    #                 loss.backward()  
+
+    #             # Collect gradients for each parameter
+    #             for idx, param in enumerate(self.net.parameters()):
+    #                 if param.grad is not None:
+    #                     gradients[idx] += param.grad.clone().detach()
+
+    #     return gradients
 # from torchsummary import summary
 
 # # Create an instance of your model
