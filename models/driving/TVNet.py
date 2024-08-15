@@ -9,6 +9,9 @@ from torch.nn.functional import pad
 from torch.nn.modules import Module
 from torch.nn.parameter import Parameter
 from torch.nn.modules.utils import _pair
+import torchvision.models as models
+from torchvision.models.inception import InceptionOutputs
+
 NUMBER_CLASSES = 1
 FEATURE_SIZE = 6272
 import tqdm
@@ -339,16 +342,233 @@ class ADTVNet(nn.Module):
 
         return self.fc(x_final)
 
+class ResBlockCBAM(nn.Module):
+    def __init__(self, res_block, in_channels, out_channels):
+        super(ResBlockCBAM, self).__init__()
+        self.res_block = res_block
+        self.cbam = CBAM(gate_channels=out_channels)
+        
+        # Define a 1x1 convolutional layer for channel matching
+        self.conv1x1 = None
+        if in_channels != out_channels:
+            self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=2, bias=False)
+
+    def forward(self, x):
+        residual = x
+        
+        # Pass through ResNet block and CBAM
+        out = self.res_block(x)
+        out = self.cbam(out)
+        
+        # Adjust residual using 1x1 conv if needed
+        if self.conv1x1 is not None:
+            residual = self.conv1x1(residual)
+
+        # Element-wise addition
+        out += residual
+        return out
+    
+# Define the ADTVNet model using pretrained ResNet with integrated CBAM in each block
+class AttentionADTVNet(nn.Module):
+    def __init__(self):
+        super(AttentionADTVNet, self).__init__()
+        
+        # Load a pretrained ResNet model
+        resnet = models.resnet18(pretrained=True)
+        
+        # Modify the first convolutional layer to accept 1 channel input
+        self.initial_layers = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False),
+            resnet.bn1,
+            resnet.relu,
+            resnet.maxpool
+        )
+        
+        # Integrate CBAM within ResNet blocks
+        self.res_block1 = ResBlockCBAM(resnet.layer1, 64, 64)
+        self.res_block2 = ResBlockCBAM(resnet.layer2, 64, 128)
+        self.res_block3 = ResBlockCBAM(resnet.layer3, 128, 256)
+        self.res_block4 = ResBlockCBAM(resnet.layer4, 256, 512)
+
+        # Fully connected layers for steering angle prediction
+        self.fc1 = nn.Linear(512, 256)  # ResNet18 final layer output size
+        self.fc2 = nn.Linear(256, 1)    # Adjust output for regression or classification
+
+    def forward(self, x):
+        # Forward pass through ResNet blocks and CBAMs
+        x = self.initial_layers(x)
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = self.res_block3(x)
+        x = self.res_block4(x)
+        
+        # Global average pooling
+        x = torch.mean(x, dim=[2, 3])
+        
+        # Fully connected layers
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        
+        return x
+
+class InceptionNet(nn.Module):
+    def __init__(self):
+        super(InceptionNet, self).__init__()
+        self.model = models.inception_v3(pretrained=True)
+
+        # Modify the first convolution layer to accept single or three-channel input
+        self.model.Conv2d_1a_3x3.conv = nn.Conv2d(3, 32, kernel_size=(3, 3), stride=(2, 2), bias=False)
+
+        # Adjust the final layer for regression or classification
+        self.model.fc = nn.Linear(self.model.fc.in_features, NUMBER_CLASSES)
+
+    def forward(self, x):
+        # Check if the input is single-channel and expand it to three channels
+        if x.size(1) == 1:
+            x = x.repeat(1, 3, 1, 1)
+        
+        # Resize the input to match the expected size for InceptionNet
+        x = nn.functional.interpolate(x, size=(299, 299), mode='bilinear', align_corners=False)
+        
+        return self.model(x)
+
+class MobileNet(nn.Module):
+    def __init__(self):
+        super(MobileNet, self).__init__()
+        self.model = models.mobilenet_v2(pretrained=True)
+        # Modify the first layer to handle different input channels dynamically
+        self.model.features[0][0] = nn.Conv2d(3, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+
+        # Adjust the final layer to match the number of classes
+        self.model.classifier[1] = nn.Linear(self.model.classifier[1].in_features, NUMBER_CLASSES)
+
+    def forward(self, x):
+        # Convert single-channel input to three-channel
+        if x.size(1) == 1:
+            x = x.repeat(1, 3, 1, 1)
+        # Resize input to match MobileNet's expected size
+        x = nn.functional.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        return self.model(x)
+
+class VGG16(nn.Module):
+    def __init__(self, pretrained=True, freeze_layers=True):
+        super(VGG16, self).__init__()
+        self.model = models.vgg16(pretrained=pretrained)
+
+        # Freeze layers if required
+        if freeze_layers:
+            for param in self.model.features.parameters():
+                param.requires_grad = False
+
+        # Modify the classifier to match the number of output classes
+        self.model.classifier[6] = nn.Linear(self.model.classifier[6].in_features, NUMBER_CLASSES)
+
+    def forward(self, x):
+        # Convert single-channel input to three-channel
+        if x.size(1) == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        # Resize input to match VGG16's expected size
+        x = nn.functional.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+
+        return self.model(x)
+
+class DAVE2(nn.Module):
+    def __init__(self):
+        super(DAVE2, self).__init__()
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(3, 24, 5, stride=2),  # Conv2d layer 1
+            nn.ELU(),
+            nn.Conv2d(24, 36, 5, stride=2), # Conv2d layer 2
+            nn.ELU(),
+            nn.Conv2d(36, 48, 5, stride=2), # Conv2d layer 3
+            nn.ELU(),
+            nn.Conv2d(48, 64, 3),           # Conv2d layer 4
+            nn.ELU(),
+            nn.Conv2d(64, 64, 3),           # Conv2d layer 5
+            nn.Dropout(0.5)
+        )
+        
+        # Calculate the size of the flattened feature map from the conv layers
+        self.calculate_feature_size()
+
+        self.dense_layers = nn.Sequential(
+            nn.Linear(self.feature_size, 100),
+            nn.ELU(),
+            nn.Linear(100, 50),
+            nn.ELU(),
+            nn.Linear(50, 10),
+            nn.ELU(),
+            nn.Linear(10, 1)
+        )
+
+    def calculate_feature_size(self):
+        # Create a dummy input to calculate the flattened feature size
+        dummy_input = torch.zeros(1, 3, 200, 200)  # 3-channel input
+        output = self.conv_layers(dummy_input)
+        self.feature_size = output.view(1, -1).size(1)
+
+    def forward(self, data):
+        # Check if the input is single-channel and convert to three-channel
+        if data.size(1) == 1:
+            data = data.repeat(1, 3, 1, 1)
+
+        output = self.conv_layers(data)
+        output = output.view(output.size(0), -1)
+        output = self.dense_layers(output)
+        return output
+
+
+
+class RandomNet(nn.Module):
+    def __init__(self):
+        super(RandomNet, self).__init__()
+        # Add a dummy parameter for the optimizer
+        self.dummy_param = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        # Generate random values and add the dummy parameter to ensure gradients
+        random_output = torch.rand(batch_size, NUMBER_CLASSES, device=x.device)
+        return random_output + self.dummy_param
+
+class ConstantNet(nn.Module):
+    def __init__(self, constant=0.5):
+        super(ConstantNet, self).__init__()
+        self.constant = constant
+        # Add a dummy parameter for the optimizer
+        self.dummy_param = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        # Return a tensor full of the constant value with the correct shape
+        return torch.full((batch_size, NUMBER_CLASSES), self.constant).to(x.device) + self.dummy_param
+
 class DrivingNet(Model):
-    def __init__(self, model, criterion, metric, device,
+    def __init__(self, model, criterion, metrics, device,
                  optimizer_name="adam", lr_scheduler="sqrt", initial_lr=1e-3, epoch_size=1):
         super(DrivingNet, self).__init__()
         if model == "FADNet_plus":
             self.net = FADNet_plus().to(device)
-        else: self.net = ADTVNet().to(device)
+        elif model == "AttentionADTVNet":
+            self.net = AttentionADTVNet().to(device)
+        elif model == "InceptionNet":
+            self.net = InceptionNet().to(device)
+        elif model == "MobileNet":
+            self.net = MobileNet().to(device)
+        elif model == "VGG16":
+            self.net = VGG16().to(device)
+        elif model == "RandomNet":
+            self.net = RandomNet().to(device)
+        elif model == "ConstantNet":
+            self.net = ConstantNet().to(device)    
+        elif model == "DAVE2":
+            self.net = DAVE2().to(device)  
+        else: 
+            self.net = ADTVNet().to(device)
     
         self.criterion = criterion
-        self.metric = metric
+        self.metrics = metrics  # A list of metrics
         self.device = device
 
         self.optimizer = get_optimizer(optimizer_name, self.net, initial_lr)
@@ -356,7 +576,7 @@ class DrivingNet(Model):
 
     def fit_iterator_one_epoch(self, iterator):
         epoch_loss = 0
-        epoch_acc = 0
+        epoch_metrics = [0] * len(self.metrics)  # Initialize list for multiple metrics
 
         self.net.train()
 
@@ -368,7 +588,9 @@ class DrivingNet(Model):
 
             loss = self.criterion(predictions, y)
 
-            acc = self.metric(predictions, y)
+            # Compute metrics
+            for idx, metric in enumerate(self.metrics):
+                epoch_metrics[idx] += metric(predictions, y).item()
 
             loss.backward()
 
@@ -376,9 +598,10 @@ class DrivingNet(Model):
             self.lr_scheduler.step()
 
             epoch_loss += loss.item()
-            epoch_acc += acc.item()
 
-        return epoch_loss / len(iterator), epoch_acc / len(iterator)
+        avg_loss = epoch_loss / len(iterator)
+        avg_metrics = [metric / len(iterator) for metric in epoch_metrics]
+        return avg_loss, avg_metrics
 
     def fit_batch(self, iterator, update=True):
         self.net.train()
@@ -393,7 +616,9 @@ class DrivingNet(Model):
         predictions = self.net(x)
 
         loss = self.criterion(predictions, y)
-        acc = self.metric[0](predictions, y)
+        
+        # Calculate metrics for the batch
+        batch_metrics = [metric(predictions, y).item() for metric in self.metrics]
 
         loss.backward()
 
@@ -402,18 +627,19 @@ class DrivingNet(Model):
             # self.lr_scheduler.step()
 
         batch_loss = loss.item()
-        batch_acc = acc.item()
+        
         # Collect gradients for each parameter
         batch_gradients = [
             param.grad.clone().detach() if param.grad is not None else torch.zeros_like(param)
             for param in self.net.parameters()
         ]
 
-        return batch_loss, batch_acc, batch_gradients
+        return batch_loss, batch_metrics, batch_gradients
 
     def evaluate_iterator(self, iterator):
         epoch_loss = 0
-        epoch_acc = 0
+        epoch_rmse = 0
+        epoch_mae = 0  # Add MAE here
 
         self.net.eval()
         with torch.no_grad():
@@ -424,12 +650,15 @@ class DrivingNet(Model):
 
                 loss = self.criterion(predictions, y)
 
-                acc = self.metric[0](predictions, y)
+                # Calculate RMSE and MAE
+                rmse = self.metrics[0](predictions, y)
+                mae = self.metrics[1](predictions, y)
 
                 epoch_loss += loss.item()
-                epoch_acc += acc.item()
+                epoch_rmse += rmse.item()
+                epoch_mae += mae.item()  # Add MAE accumulation
 
-        return epoch_loss / len(iterator), epoch_acc / len(iterator)
+        return epoch_loss / len(iterator), epoch_rmse / len(iterator), epoch_mae / len(iterator)  # Return MAE
 
     # def compute_gradients(self, data_iterator, device):
     #     self.net.eval()  

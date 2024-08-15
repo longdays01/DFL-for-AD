@@ -40,14 +40,17 @@ class Model(ABC):
 
     def fit_batches(self, iterator, n_steps):
         global_loss = 0
-        global_acc = 0
+        global_metrics = [0] * len(self.metrics)  # Initialize list for metrics
 
         for step in range(n_steps):
-            batch_loss, batch_acc, batch_gradients = self.fit_batch(iterator)
+            batch_loss, batch_metrics, batch_gradients = self.fit_batch(iterator)
             global_loss += batch_loss
-            global_acc += batch_acc
+            for i, metric in enumerate(batch_metrics):
+                global_metrics[i] += metric
 
-        return global_loss / n_steps, global_acc / n_steps, batch_gradients
+        # Return average loss and metrics over all steps
+        return global_loss / n_steps, [metric / n_steps for metric in global_metrics], batch_gradients
+
 
     def fit_iterator(self, train_iterator, val_iterator=None, n_epochs=1, path=None, verbose=0):
         best_valid_loss = float('inf')
@@ -56,9 +59,9 @@ class Model(ABC):
 
             start_time = time.time()
 
-            train_loss, train_acc = self.fit_iterator_one_epoch(train_iterator)
+            train_loss, train_metrics = self.fit_iterator_one_epoch(train_iterator)
             if val_iterator:
-                valid_loss, valid_acc = self.evaluate_iterator(val_iterator)
+                valid_loss, valid_metrics = self.evaluate_iterator(val_iterator)
 
             end_time = time.time()
 
@@ -72,9 +75,10 @@ class Model(ABC):
 
             if verbose:
                 print(f'Epoch: {epoch + 1:02} | Epoch Time: {epoch_mins}m {epoch_secs}s')
-                print(f'\tTrain Loss: {train_loss:.3f} | Train Acc: {train_acc * 100:.2f}%')
+                print(f'\tTrain Loss: {train_loss:.3f} | Train RMSE: {train_metrics[0]:.3f} | Train MAE: {train_metrics[1]:.3f}')
                 if val_iterator:
-                    print(f'\t Val. Loss: {valid_loss:.3f} |  Val. Acc: {valid_acc * 100:.2f}%')
+                    print(f'\t Val. Loss: {valid_loss:.3f} |  Val. RMSE: {valid_metrics[0]:.3f} | Val. MAE: {valid_metrics[1]:.3f}')
+
 
     def get_param_tensor(self):
         param_list = []

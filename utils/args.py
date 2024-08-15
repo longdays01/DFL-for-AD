@@ -8,7 +8,7 @@ def parse_args(args_list=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         'experiment',
-        choices=['driving_carla', 'driving_gazebo'],
+        choices=['driving_carla', 'driving_gazebo', 'driving_udacity'],
         help='name of experiment, possible: driving_carla, driving_gazebo',
         type=str)
     parser.add_argument(
@@ -25,8 +25,8 @@ def parse_args(args_list=None):
     )
     parser.add_argument(
         '--model',
-        choices=['FADNet_plus', 'ADTVNet'],
-        help='model to use, possible: FADNet_plus, ADTVNet',
+        choices=['FADNet_plus', 'ADTVNet', 'AttentionADTVNet', 'InceptionNet', 'MobileNet', 'VGG16', 'RandomNet', 'ConstantNet', 'DAVE2', 'AttDAVE2', 'ResNet8'],
+        help='model to use, possible: FADNet_plus, ADTVNet, AttentionADTVNet',
         default='ADTVNet'
     )
     parser.add_argument(
@@ -45,7 +45,12 @@ def parse_args(args_list=None):
         '--reload',
         help='if chosen reload and retrain',
         action='store_true'
-    )    
+    )
+    parser.add_argument(
+        '--tuning',
+        help='find best parameters',
+        action='store_true'
+    )            
     parser.add_argument(
         '--n_rounds',
         help='number of communication rounds;',
@@ -58,6 +63,12 @@ def parse_args(args_list=None):
         type=int,
         default=32
     )
+    parser.add_argument(
+        '--num_cpus',
+        help='number of cpu cores;',
+        type=int,
+        default=0
+    )    
     parser.add_argument(
         '--n_workers',
         help='number of worker nodes;',
@@ -157,8 +168,8 @@ def parse_args(args_list=None):
     )
     parser.add_argument(
         '--network_type',
-        choices=['Peer2PeerNetwork', 'Peer2PeerNetworkABP, CentralizedNetwork'],
-        help='Type of network to use; possible: Peer2PeerNetwork, Peer2PeerNetworkABP, CentralizedNetwork',
+        choices=['Peer2PeerNetwork', 'Peer2PeerNetworkABP', 'CentralizedNetwork', 'LocalNetwork'],
+        help='Type of network to use; possible: Peer2PeerNetwork, Peer2PeerNetworkABP, CentralizedNetwork, LocalNetwork',
         default='Peer2PeerNetworkABP'
     )
     if args_list:
@@ -174,7 +185,7 @@ def parse_args(args_list=None):
     timestamp = datetime.now(arizona_tz).strftime("%Y%m%d-%H%M%S")
     
     # Create dynamic results folder name with Arizona timestamp
-    args.save_logg_path = f"{timestamp}_{args.network_type}_{args.experiment}_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_bz{args.bz_train}_n{args.n_workers}_nrounds{args.n_rounds}_poisson{args.poisson_rate}_threshold{args.threshold}"
+    args.save_logg_path = f"{timestamp}_{args.model}_{args.network_type}_{args.experiment}_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_bz{args.bz_train}_n{args.n_workers}_nrounds{args.n_rounds}_poisson{args.poisson_rate}_threshold{args.threshold}"
     
     # Create the directory if it doesn't exist
     if not os.path.exists(args.save_logg_path):

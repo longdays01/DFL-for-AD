@@ -7,7 +7,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from utils.metrics import RMSE
+from utils.metrics import RMSE, MAE
 
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
@@ -44,6 +44,28 @@ def args_to_string(args):
         args_string += "_" + str(getattr(args, arg)) + "_"
     return args_string[:-1]
 
+def format_command(args):
+    command = f"python main.py {args.experiment} " \
+              f"--network_name {args.network_name} " \
+              f"--decay {args.decay} " \
+              f"--architecture {args.architecture} " \
+              f"--poisson {args.poisson_rate} " \
+              f"--device {args.device} " \
+              f"--log_freq {args.log_freq} " \
+              f"--n_rounds {args.n_rounds} " \
+              f"--bz_train {args.bz_train} " \
+              f"--bz_test {args.bz_test} " \
+              f"--local_steps {args.local_steps} " \
+              f"--lr {args.lr} " \
+              f"--min_degree {args.min_degree} " \
+              f"--beta {args.beta} " \
+              f"--gamma {args.gamma} " \
+              f"--alpha {args.alpha} " \
+              f"--model {args.model} " \
+              f"--network_type {args.network_type} " \
+              f"--threshold {args.threshold} " \
+              f"--reload {args.reload} "
+    return command
 
 def get_optimal_mixing_matrix(adjacency_matrix, method="FDLA"):
     """
@@ -194,17 +216,17 @@ def get_model(name, model, device, epoch_size, optimizer_name="adam", lr_schedul
 
     if "driving" in name:
         criterion = nn.MSELoss()
-        metric = [RMSE]
-        return DrivingNet(model, criterion, metric, device, optimizer_name, lr_scheduler, initial_lr, epoch_size)
+        metrics = [RMSE, MAE]
+        return DrivingNet(model, criterion, metrics, device, optimizer_name, lr_scheduler, initial_lr, epoch_size)
     else:
         raise NotImplementedError
 
 
-def get_iterator(name, path, device, batch_size):
+def get_iterator(name, path, device, batch_size, num_cpus):
     if name == "driving_udacity":
-        return get_iterator_driving(path, device, batch_size=batch_size)
+        return get_iterator_complex_driving(path, device, batch_size=batch_size, num_cpus=num_cpus)
     elif "driving_gazebo" in name or "driving_carla" in name:
-        return get_iterator_complex_driving(path, device, batch_size=batch_size)
+        return get_iterator_complex_driving(path, device, batch_size=batch_size, num_cpus=num_cpus)
     else:
         raise NotImplementedError
 

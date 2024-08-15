@@ -133,7 +133,7 @@ def central_image_crop(img, crop_width=150, crop_heigth=150):
               half_the_width + int(crop_width / 2)]
     return img
 
-def get_iterator_complex_driving(file_path, device, batch_size=1, num_workers=0):
+def get_iterator_complex_driving(file_path, device, batch_size=1, num_cpus=0):
     """
     Returns an iterator over UDACITY-DRIVING dataset batches
     :param file_path: path to .npz file containing a list of tuples
@@ -145,6 +145,6 @@ def get_iterator_complex_driving(file_path, device, batch_size=1, num_workers=0)
 
     dataset = ComplexDrivingData(file_path, device=device)
     iterator = DataLoader(
-        dataset, shuffle='train' in file_path, batch_size=batch_size, num_workers=num_workers, pin_memory=True
+        dataset, shuffle='train' in file_path, batch_size=batch_size, num_workers=num_cpus, pin_memory=True
     )
     return iterator
