@@ -61,7 +61,7 @@ bash train_gazebo_gaia.sh
 * To train our method on CARLA dataset with GAIA network, you can use the same setup on GAZEBO.
 
 ### Result
-![Fig-3](misc/network_comparison.pdf)
+![Fig-3](misc/network_comparison.png)
 *<center>**Figure 3**: Initial results.</center>*
 
 * The result demonstrates that our proposed method outperformed the existing methods
