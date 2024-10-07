@@ -8,9 +8,9 @@
 ![Fig-2](misc/FL-Autonomous.drawio.png)
 *<center>**Figure 2**: Neural network architecture.</center>*
 
-This repository is the implementation of a DFL for Autonomous Driving over Time-varying Directed Communication Networks. We benchmark our method on three public datasets: [Udacity](https://www.udacity.com/self-driving-car), Carla, and Gazebo.
+This is the first work considering DFL for Autonomous Driving over Time-varying Directed Communication Networks. We benchmark our method on three public datasets: [Udacity](https://www.udacity.com/self-driving-car), Carla, and Gazebo.
 
-This repository is based on and inspired by @Othmane Marfoq [work](https://github.com/omarfoq/communication-in-cross-silo-fl). 
+This repository is inspired by @Othmane Marfoq https://arxiv.org/abs/2010.12229
 
 ## Summary
 
