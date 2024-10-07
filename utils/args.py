@@ -2,7 +2,7 @@ import os
 import argparse
 from datetime import datetime
 from utils.utils import get_network
-import pytz  # Import the pytz library
+import pytz  
 
 def parse_args(args_list=None):
     parser = argparse.ArgumentParser()
@@ -13,7 +13,7 @@ def parse_args(args_list=None):
         type=str)
     parser.add_argument(
         '--network_name',
-        choices=['gaia', 'amazon_us'],
+        choices=['gaia', 'amazon_us', 'nws'],
         help='name of the network; possible: gaia, amazon_us',
         type=str
     )
@@ -25,7 +25,9 @@ def parse_args(args_list=None):
     )
     parser.add_argument(
         '--model',
-        choices=['FADNet_plus', 'ADTVNet', 'AttentionADTVNet', 'InceptionNet', 'MobileNet', 'VGG16', 'RandomNet', 'ConstantNet', 'DAVE2', 'AttDAVE2', 'ResNet8'],
+        choices=['FADNet_plus', 'ADTVNet', 'SwinTransformer', 'InceptionNet', 'MobileNet', 
+                 'SwinTransformer_base', 'RandomNet', 'ConstantNet', 'DAVE2', 'ResNet8', 'ResNet18', 
+                 'EfficientNetV2', 'MobileViT', 'TinyViT', 'CDL_FADNet', 'DAVE2_base'],        
         help='model to use, possible: FADNet_plus, ADTVNet, AttentionADTVNet',
         default='ADTVNet'
     )
@@ -35,6 +37,12 @@ def parse_args(args_list=None):
         help="the probability of using a random ring at each step; only used if architecture is ring",
         default=0.5
     )
+    parser.add_argument(
+        '--local',
+        help='if chosen local step is used before communication step,'
+             ' otherwise each local step equal to 0',
+        action='store_true'
+    )    
     parser.add_argument(
         '--fit_by_epoch',
         help='if chosen each local step corresponds to one epoch,'
@@ -50,7 +58,12 @@ def parse_args(args_list=None):
         '--tuning',
         help='find best parameters',
         action='store_true'
-    )            
+    )      
+    parser.add_argument(
+        '--cdl',
+        help='choose centralized deep learning',
+        action='store_true'
+    )   
     parser.add_argument(
         '--n_rounds',
         help='number of communication rounds;',
@@ -177,18 +190,12 @@ def parse_args(args_list=None):
     else:
         args = parser.parse_args()
 
-    network = get_network(args.network_name, args.architecture, args.experiment)
-    args.num_workers = network.number_of_nodes()
-
-    # Get the current time in Arizona timezone
     arizona_tz = pytz.timezone('US/Arizona')
     timestamp = datetime.now(arizona_tz).strftime("%Y%m%d-%H%M%S")
     
-    # Create dynamic results folder name with Arizona timestamp
     args.save_logg_path = f"{timestamp}_{args.model}_{args.network_type}_{args.experiment}_a{args.alpha}_b{args.beta}_g{args.gamma}_lr{args.lr}_md{args.min_degree}_ls{args.local_steps}_bz{args.bz_train}_n{args.n_workers}_nrounds{args.n_rounds}_poisson{args.poisson_rate}_threshold{args.threshold}"
     
-    # Create the directory if it doesn't exist
     if not os.path.exists(args.save_logg_path):
         os.makedirs(args.save_logg_path)
-
+        
     return args

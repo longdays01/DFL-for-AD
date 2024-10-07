@@ -27,8 +27,14 @@ class Network(ABC):
         self.device = args.device
         self.batch_size_train = args.bz_train
         self.batch_size_test = args.bz_test
-        self.network = get_network(args.network_name, args.architecture, args.experiment)
-        self.n_workers = self.network.number_of_nodes()
+        
+        if self.args.network_type != "Peer2PeerNetworkABP":
+            self.network = get_network(args.network_name, args.architecture, args.experiment)
+            self.n_workers = self.network.number_of_nodes()
+        else:
+            self.n_workers = args.n_workers            
+        
+        self.n_workers = args.n_workers
         self.local_steps = args.local_steps
         self.log_freq = args.log_freq
         self.fit_by_epoch = args.fit_by_epoch
@@ -48,6 +54,7 @@ class Network(ABC):
         self.disconnected_nodes_count = 0  
         self.reload = args.reload 
         self.best_rmse_arr = []
+
         # create logger
         if args.save_logg_path == "":
             self.logger_path = os.path.join("loggs", args_to_string(args), args.architecture)
@@ -90,9 +97,13 @@ class Network(ABC):
         for worker_id in range(self.n_workers):
             data_path = os.path.join(self.train_dir, str(worker_id) + extension)
             print('\t + Loading: > %s < dataset from: %s' % (args.experiment, data_path))
-            self.workers_iterators.append(get_iterator(args.experiment, data_path, self.device, self.batch_size_train, num_cpus=args.num_cpus))
+            
+            if self.n_workers == 1 and args.cdl:
+                self.workers_iterators.append(get_iterator(args.experiment, self.train_path, self.device, self.batch_size_train, num_cpus=args.num_cpus))
+            else: 
+                self.workers_iterators.append(get_iterator(args.experiment, data_path, self.device, self.batch_size_train, num_cpus=args.num_cpus))
             train_data_size += len(self.workers_iterators[-1])
-
+            print(train_data_size)
         self.epoch_size = int(train_data_size / self.n_workers)
 
         # create workers models
@@ -170,7 +181,7 @@ class Network(ABC):
                     if test_rmse < self.best_rmse:
                         self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
                         self.best_rmse = test_rmse
-                        if self.round_idx >= 9000:
+                        if self.medium_rmse_flag:
                             self.save_models(round=self.round_idx)
                         self.best_round = self.round_idx
                         self.best_rmse_arr.append(test_rmse)
@@ -188,21 +199,23 @@ class Network(ABC):
                     if test_rmse < self.best_rmse:
                         self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
                         self.best_rmse = test_rmse
-                        self.save_models(round=self.round_idx)
+                        if self.medium_rmse_flag:
+                            self.save_models(round=self.round_idx)
                         self.best_round = self.round_idx
                         self.best_rmse_arr.append(test_rmse)
             else: 
-                if test_rmse < 0.03:
+                if test_rmse < 0.1:
                     self.rmse_flag = True
-                    if test_rmse < 0.02:
+                    if test_rmse < 0.09:
                         self.medium_rmse_flag = True
-                        if test_rmse < 0.03:
+                        if test_rmse < 0.08:
                             self.small_rmse_flag = True
 
                     if test_rmse < self.best_rmse:
                         self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
                         self.best_rmse = test_rmse
-                        self.save_models(round=self.round_idx)
+                        if self.medium_rmse_flag:
+                            self.save_models(round=self.round_idx)
                         self.best_round = self.round_idx
                         self.best_rmse_arr.append(test_rmse)
                         
@@ -240,7 +253,7 @@ class Network(ABC):
     #         self.workers_models[i].net.load_state_dict(model_data.get('model_state', model_data))
 
     def save_models(self, round):
-        # Delete previous best model if it exists
+        # delete previous best model if it exists
         old_round_path = os.path.join(self.logger_path, 'round_%s' % self.best_round)
         if os.path.exists(old_round_path):
             for file_name in os.listdir(old_round_path):
@@ -420,19 +433,19 @@ class Peer2PeerNetworkABP(Network):
         self.test_losses = []
         self.rounds = []  
         self.evaluation_results = []  
-        self.k = args.local_steps  # Number of local iterations
+        self.k = args.local_steps 
         self.n_workers = args.n_workers
-        # self.alpha = 0.00002  # Step size/learning rate
+        # self.alpha = 0.00002  # learning rate
         # self.beta = 0.0000    # Heavy-ball momentum parameter
         # self.gamma = 0.0000001   # Nesterov momentum parameter
         self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
         self.poisson_rate = args.poisson_rate
-        self.disconnected_nodes_count = 0  # Track the number of disconnected nodes
-
+        self.disconnected_nodes_count = 0 
+        self.local = args.local
         self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
         
         self.stop_criterion = False
-
+        self.gradients_list = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
         self.s = []
         self.y = []
         self.x_prev = []
@@ -446,13 +459,13 @@ class Peer2PeerNetworkABP(Network):
             y_worker = []
             x_prev_worker = []
 
-            # Initialize s and x_prev with the model parameters
             for param in model.net.parameters():
                 s_worker.append(param.clone().detach().to(self.device))
                 x_prev_worker.append(param.clone().detach().to(self.device))
             self.s.append(s_worker)
             self.x_prev.append(x_prev_worker)
             self.x_diff_prev
+
             # Compute the initial gradients for y
             model.net.to(self.device)
             model.net.zero_grad()
@@ -469,10 +482,6 @@ class Peer2PeerNetworkABP(Network):
             for param in model.net.parameters():
                 y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
             self.y.append(y_worker)
-
-            # # Create and store a scheduler for each worker's optimizer
-            # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model.optimizer, 'min', patience=10, factor=0.5)
-            # self.schedulers.append(scheduler)
 
     def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
         rng = np.random.default_rng()
@@ -499,41 +508,35 @@ class Peer2PeerNetworkABP(Network):
         num_disconnected_nodes = np.random.poisson(poisson_rate)
         disconnected_nodes = rng.choice(n, num_disconnected_nodes, replace=False) if num_disconnected_nodes < n else []
 
-        # Ensure each node has a self-loop, unless it's a disconnected node
+        # self-loop
         for i in range(n):
             if i not in disconnected_nodes:
                 Adj[i, i] = 1
 
-        # Add initial random edges to ensure strong connectivity for non-disconnected nodes
         non_disconnected_nodes = [i for i in range(n) if i not in disconnected_nodes]
         for i in non_disconnected_nodes:
             for _ in range(min_degree):
                 j = rng.choice(non_disconnected_nodes)
                 if i != j:
                     Adj[i][j] = 1
-
-        # Ensure the graph is strongly connected for non-disconnected nodes
         while not self.is_strongly_connected(Adj, non_disconnected_nodes):
             i = rng.choice(non_disconnected_nodes)
             j = rng.choice(non_disconnected_nodes)
             if i != j:
                 Adj[i][j] = 1
 
-        # Add additional random edges to increase density for non-disconnected nodes
         for _ in range(additional_edges):
             i = rng.choice(non_disconnected_nodes)
             j = rng.choice(non_disconnected_nodes)
             if i != j:
                 Adj[i][j] = 1
 
-        # Ensure that disconnected nodes have no connections
         for node in disconnected_nodes:
             Adj[node, :] = 0
             Adj[:, node] = 0
 
         return Adj, disconnected_nodes
 
-    
     # Ensure the graph is strongly connected
     def is_strongly_connected(self, adj_matrix, nodes):
         subgraph = adj_matrix[nodes, :][:, nodes]
@@ -587,20 +590,22 @@ class Peer2PeerNetworkABP(Network):
         gradients_list = []
 
         # Perform local updates and compute gradients for each worker
-        for worker_id, model in enumerate(self.workers_models):
-            model.net.to(self.device)
-            gradients = self.local_updates(worker_id)
-            # for x, y in self.workers_iterators[worker_id]:
-            #     self.optimizer.zero_grad()
-            #     x = x.to(self.device, dtype=torch.float)
-            #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
-            #     predictions = model.net(x)
-            #     loss = model.criterion(predictions, y)
-            #     loss.backward()
-
-            # gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
-            gradients_list.append(gradients)
-
+        if self.local:
+            for worker_id, model in enumerate(self.workers_models):
+                model.net.to(self.device)
+                gradients = self.local_updates(worker_id)
+                # for x, y in self.workers_iterators[worker_id]:
+                #     self.optimizer.zero_grad()
+                #     x = x.to(self.device, dtype=torch.float)
+                #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+                #     predictions = model.net(x)
+                #     loss = model.criterion(predictions, y)
+                #     loss.backward()
+    
+                # gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
+                gradients_list.append(gradients)
+            self.gradient_list = gradients_list
+                
         A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=self.min_degree, additional_edges=5)
 
         x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
@@ -644,7 +649,6 @@ class Peer2PeerNetworkABP(Network):
             # Apply gradient clipping
             # torch.nn.utils.clip_grad_norm_(model.net.parameters(), self.max_grad_norm)
             
-
             new_gradients = []
             for param in model.net.parameters():
                 new_gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
@@ -653,7 +657,7 @@ class Peer2PeerNetworkABP(Network):
         for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
             for worker_id, model in enumerate(self.workers_models):
                 # Calculate the gradient difference
-                diff_grad = new_gradients_list[worker_id][param_idx] - gradients_list[worker_id][param_idx]
+                diff_grad = new_gradients_list[worker_id][param_idx] - self.gradients_list[worker_id][param_idx]
 
                 # print(f"Worker {worker_id} - Param {param_idx} - Shape of gradient: {gradients_list[worker_id][param_idx].shape}")
                 # print(f"Worker {worker_id} - Param {param_idx} - Shape of new gradient: {new_gradients_list[worker_id][param_idx].shape}")
@@ -666,26 +670,8 @@ class Peer2PeerNetworkABP(Network):
                 
                 # Update stored values
                 self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
-                # Plot results after evaluation
 
-        # if ((self.round_idx-1) % 1000 == 0 and self.round_idx!= 0 and not self.args.test) or self.round_idx == self.max_round:
-        #     # if not self.args.test:
-        #     self.save_models(round=self.round_idx)
-        #     self.plot_results()
-
-        # Check early stopping criteria
-        # val_loss, val_rmse = self.global_model.evaluate_iterator(self.test_iterator)
-        # self.early_stopping(val_loss, self.global_model, self.round_idx, self)
-        # if self.early_stopping.early_stop:
-        #     print("Early stopping")
-        #     return
-
-        # Update learning rate schedulers
-        # for scheduler in self.schedulers:
-        #     scheduler.step()
-
-        # Update alpha using the scheduler
-        # self.alpha = self.scheduler.step()
+        self.gradient_list = new_gradients_list
         
                 # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
@@ -761,10 +747,14 @@ class LocalNetwork(Network):
         for worker_id, model in enumerate(self.workers_models):
             model.net.to(self.device)
             if self.fit_by_epoch:
-                model.fit_iterator(train_iterator=self.workers_iterators[worker_id],
-                                   n_epochs=self.local_steps, verbose=0)
+                model.fit_iterator(train_iterator=self.workers_iterators[worker_id], n_epochs=self.local_steps, verbose=0)
             else:
-                model.fit_batches(iterator=self.workers_iterators[worker_id], n_steps=self.local_steps)
+                batch_loss, batch_acc, batch_gradients = model.fit_batches(
+                    iterator=self.workers_iterators[worker_id], 
+                    n_steps=self.local_steps
+                )
+                if ((self.round_idx - 1) % self.log_freq == 0):
+                    print(f"Worker {worker_id}: Batch Loss: {batch_loss}, Batch Accuracy: {batch_acc}")
 
         # write logs
         if ((self.round_idx - 1) % self.log_freq == 0) and write_results:

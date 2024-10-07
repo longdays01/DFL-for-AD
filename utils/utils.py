@@ -12,20 +12,23 @@ from utils.metrics import RMSE, MAE
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 from models.driving.TVNet import DrivingNet
+from models.driving.CDLNet import Driving_CDL_FADNet
+
 from loaders.driving import get_iterator_driving
 from loaders.complex_driving import get_iterator_complex_driving
 import functools
 import operator
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 EXTENSIONS = {"driving": ".npz"}
 
-# Model size in bit
+
 MODEL_SIZE_DICT = {"driving": 358116680}
 
-# Model computation time in ms
+
 COMPUTATION_TIME_DICT = {"driving": 30.2}
 
-# Tags list
+
 TAGS = ["Train/Loss", "Train/Acc", "Test/Loss", "Test/Acc", "Consensus"]
 
 
@@ -112,7 +115,7 @@ def get_optimal_mixing_matrix(adjacency_matrix, method="FDLA"):
     if method == "FMMC":
         mixing_matrix = np.multiply(mixing_matrix, mixing_matrix >= 0)
 
-    # Force symmetry
+    
     for i in range(N):
         if np.abs(np.sum(mixing_matrix[i, i:])) >= 1e-20:
             mixing_matrix[i, i:] *= (1 - np.sum(mixing_matrix[i, :(i)])) / np.sum(mixing_matrix[i, i:])
@@ -198,7 +201,7 @@ def get_network(network_name, architecture, experiment):
 
 
 def get_model(name, model, device, epoch_size, optimizer_name="adam", lr_scheduler="custom",
-              initial_lr=1e-3, seed=1234):
+              initial_lr=1e-3, seed=1234, beta_supp=1.0):
     """
     Load Model object corresponding to the experiment
     :param name: experiment name; possible are: "driving" in name such as driving_carla, driving_gazebo
@@ -214,10 +217,14 @@ def get_model(name, model, device, epoch_size, optimizer_name="adam", lr_schedul
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    if "driving" in name:
+    if "driving" in name and model != 'CDL_FADNet':
         criterion = nn.MSELoss()
         metrics = [RMSE, MAE]
         return DrivingNet(model, criterion, metrics, device, optimizer_name, lr_scheduler, initial_lr, epoch_size)
+    elif "driving" in name and model == 'CDL_FADNet':
+        criterion = [nn.MSELoss(), nn.KLDivLoss(reduction='batchmean')]
+        metric = [mean_squared_error, mean_absolute_error]
+        return Driving_CDL_FADNet(criterion, metric, device, optimizer_name, lr_scheduler, initial_lr, epoch_size, beta_supp=beta_supp)
     else:
         raise NotImplementedError
 

@@ -40,7 +40,7 @@ class Model(ABC):
 
     def fit_batches(self, iterator, n_steps):
         global_loss = 0
-        global_metrics = [0] * len(self.metrics)  # Initialize list for metrics
+        global_metrics = [0] * len(self.metrics)  
 
         for step in range(n_steps):
             batch_loss, batch_metrics, batch_gradients = self.fit_batch(iterator)
@@ -48,7 +48,7 @@ class Model(ABC):
             for i, metric in enumerate(batch_metrics):
                 global_metrics[i] += metric
 
-        # Return average loss and metrics over all steps
+        
         return global_loss / n_steps, [metric / n_steps for metric in global_metrics], batch_gradients
 
 

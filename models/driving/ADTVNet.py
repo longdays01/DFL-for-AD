@@ -90,7 +90,7 @@ class _ConvNd(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
-# Same padding 2D Convolutional (use this  class to define layer)
+
 class Conv2d(_ConvNd):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -107,7 +107,7 @@ class Conv2d(_ConvNd):
         return conv2d_same_padding(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
-# Normalize
+
 cuda0 = torch.device('cuda:0')
 class FADNet_plus(nn.Module):
     def __init__(self):
@@ -158,33 +158,33 @@ class FADNet_plus(nn.Module):
 
         f1 = self.conv2(x1)
         f1 = f1.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 1
+        
         f1 = f1.mean(axis=-1)
 
         x3 = self.res_block2(x2)
 
         f2 = self.conv3(x2)
         f2 = f2.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 2
+        
         f2 = f2.mean(axis=-1)
 
         x4 = self.res_block3(x3)
 
         f3 = self.conv4(x3)
         f3 = f3.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 3
+        
         f3 = f3.mean(axis=-1)
 
         x4 = self.relu(x4)
         x4 = self.dropout(x4)
         x4 = x4.view(inputs.shape[0], -1)
 
-        # Support feature Accumulation
+        
         x_feature = self.fc_feature(torch.stack([f1, f2, f3], axis=2)).squeeze(-1)
 
-        # Aggregation with hadamard product
+        
         x_final = torch.mul(x4, x_feature)
-        # prediction
+        
         return self.fc(x_final)
 
 
@@ -252,7 +252,7 @@ class SpatialGate(nn.Module):
     def forward(self, x):
         x_compress = self.compress(x)
         x_out = self.spatial(x_compress)
-        scale = torch.sigmoid(x_out)  # broadcasting
+        scale = torch.sigmoid(x_out)  
         return x * scale
 
 class CBAM(nn.Module):
@@ -388,43 +388,43 @@ class FADNet(nn.Module):
         x1 = self.conv1(inputs)
         x1 = self.max_pool1(x1)
 
-        # Residual block 1
+        
         x2 = self.res_block1(x1)
         x2 = torch.add(self.conv2(x1), x2)
 
         f1 = self.conv2_support(x1)
         f1 = f1.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 1
+        
         f1 = f1.mean(axis=-1)
 
-        # Residual block 2
+        
         x3 = self.res_block2(x2)
         x3 = torch.add(self.conv3(x2), x3)
 
         f2 = self.conv3_support(x2)
         f2 = f2.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 2
+        
         f2 = f2.mean(axis=-1)
 
-        # Residual block 3
+        
         x4 = self.res_block3(x3)
         x4 = torch.add(self.conv4(x3), x4)
 
         f3 = self.conv4_support(x3)
         f3 = f3.view(inputs.shape[0], -1).reshape(inputs.shape[0], FEATURE_SIZE, -1)
-        # GAP support feature 3
+        
         f3 = f3.mean(axis=-1)
 
-        # FC layer
+        
         x4 = self.fc(x4)
         x4 = self.relu(x4)
         x4 = self.dropout(x4)
         x4 = x4.view(inputs.shape[0], -1)
 
-        # Support feature - Accumulation
+        
         f_feature = self.fc_accumulation(torch.stack([f1, f2, f3], axis=2)).squeeze(-1)
 
-        # Aggregation
+        
         x_final = torch.mul(x4, f_feature)
         return x_final.mean(axis=1).unsqueeze(1)
 
@@ -491,7 +491,7 @@ class DrivingNet(Model):
 
         if update:
             self.optimizer.step()
-            # self.lr_scheduler.step()
+            
 
         batch_loss = loss.item()
         batch_acc = acc.item()
@@ -519,13 +519,12 @@ class DrivingNet(Model):
         return epoch_loss / len(iterator), epoch_acc / len(iterator)
 
 
-# from torchsummary import summary
 
-# # Create an instance of your model
-# model = ADTVNet()
 
-# # Move the model to the appropriate device
-# model.to('cuda' if torch.cuda.is_available() else 'cpu')
 
-# # Print the summary
-# summary(model, input_size=(1, 224, 224))  # Adjust input size according to your input dimensions        
+
+
+
+
+
+

@@ -42,7 +42,7 @@ transformations = transforms.Compose([transforms.Lambda(lambda x: (x / 127.5) - 
 class DrivingData(Dataset):
     def __init__(
             self, file_path, device,
-            target_size=(320, 240), # (width, height)
+            target_size=(320, 240), 
             crop_size = (200, 200)):
 
         self.processed_data_file = Path(file_path)
@@ -50,7 +50,7 @@ class DrivingData(Dataset):
         self.target_size = tuple(target_size)
         self.crop_size = tuple(crop_size)
 
-        # Idea = associate each filename with a corresponding steering or label
+        
         self.filenames = []
         self.imgs = None
         self.ground_truths = []
@@ -67,26 +67,26 @@ class DrivingData(Dataset):
         if self.imgs is None:
             print("Loading processed data from {}...".format(self.processed_data_file))
             with np.load(self.processed_data_file) as data:
-                self.imgs = data['imgs']
+                self.imgs = data['file_names']
                 self.ground_truths = data['ground_truths']
             print("Images: ", self.imgs.shape)
             print("Ground truths: ", self.ground_truths.shape)
             print("Done!")
 
     def _decode_experiment_dir(self, dir_subpath):
-        # Load steerings or labels in the experiment dir
+        
         steerings_filename = os.path.join(dir_subpath, "sync_steering.txt")
         labels_filename = os.path.join(dir_subpath, "labels.txt")
 
-        # Try to load steerings first. Make sure that the steering angle or the
-        # label file is in the first column. Note also that the first line are
-        # comments so it should be skipped.
+        
+        
+        
         try:
             ground_truths = np.loadtxt(steerings_filename, usecols=0,
                                   delimiter=',', skiprows=1)
             exp_type = 1
         except OSError as e:
-            # Try load collision labels if there are no steerings
+            
             try:
                 ground_truths = np.loadtxt(labels_filename, usecols=0)
                 exp_type = 0
@@ -96,7 +96,7 @@ class DrivingData(Dataset):
                 raise IOError
 
 
-        # Now fetch all images in the image subdir
+        
         image_dir_path = os.path.join(dir_subpath, "images")
         for root, _, files in self._recursive_list(image_dir_path):
             sorted_files = sorted(files,
