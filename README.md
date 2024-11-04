@@ -6,7 +6,7 @@
 *<center>**Figure 1**: DFL for Autonomous Driving over Time-varying Directed Communication Networks.</center>*
 
 ![Fig-2](misc/FL-Autonomous.drawio.png)
-*<center>**Figure 2**: Neural network architecture.</center>*
+*<center>**Figure 2**: System Model.</center>*
 
 This is the first work considering DFL for Autonomous Driving over Time-varying Directed Communication Networks. We benchmark our method on three public datasets: [Udacity](https://www.udacity.com/self-driving-car), Carla, and Gazebo.
 
