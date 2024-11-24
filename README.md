@@ -1,4 +1,4 @@
-# Deep Federated Learning for Autonomous Driving
+# DFL for Autonomous Driving over Time-varying Directed Communication Networks
 
 *Achieving human-level autonomous driving while preserving the privacy of autonomous vehicle (AV) owners remains a challenge due to the limited data availability and the inherent mobility of vehicles. This work introduces a decentralized federated learning (DFL) framework for end-to-end autonomous driving. In this framework, we consider AVs as autonomous agents in the multi-agent system, communicating over time-varying vehicle-to-vehicle (V2V) networks, collaboratively training CNN-based deep learning (DL) models. To facilitate global consensus among AVs, we propose a novel consensus-based algorithm called FedTV, which uses decentralized stochastic gradient tracking and a push-pull algorithm to function over time-varying directed V2V networks. Experimental results across three datasets (Udacity, Carla, Gazebo) demonstrate that the proposed framework achieves state-of-the-art performance, outperforming baseline algorithms in various settings.*
 
@@ -64,4 +64,4 @@ bash train_gazebo_gaia.sh
 ![Fig-3](misc/network_comparison.png)
 *<center>**Figure 3**: Initial results.</center>*
 
-* The result demonstrates that our proposed method outperformed the existing methods
+* The result demonstrates that our proposed method outperformed the existing methods for time-varying communication graphs (A/B push-pull, Accelerated A/B push-pull) and comparable to the baseline methods with fixed networks (Centralized Network, DPASGD), which means the proposed algorithm still yields optimal results while the networks changing.
