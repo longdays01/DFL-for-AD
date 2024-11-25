@@ -372,6 +372,263 @@ class ExponentialDecayScheduler:
         self.decay_steps = state_dict['decay_steps']
         self.current_step = state_dict['current_step']
 
+class Peer2PeerNetworkABP(Network):
+    """
+    Mix local model parameters in a gossip fashion over time-varying communication graphs.
+    """           
+    def __init__(self, args):        
+        super(Peer2PeerNetworkABP, self).__init__(args)
+        self.train_losses = [] 
+        self.test_losses = []
+        self.rounds = []  
+        self.evaluation_results = []  
+        self.k = args.local_steps 
+        self.n_workers = args.n_workers
+        # self.alpha = 0.00002  # learning rate
+        # self.beta = 0.0000    # Heavy-ball momentum parameter
+        # self.gamma = 0.0000001   # Nesterov momentum parameter
+        self.max_grad_norm = 1.0  # Maximum norm value for gradient clipping
+        self.poisson_rate = args.poisson_rate
+        self.disconnected_nodes_count = 0 
+        self.local = args.local
+        self.scheduler = ExponentialDecayScheduler(self.alpha, decay_rate=0.99, decay_steps=3000)
+        
+        self.stop_criterion = False
+        self.gradients_list = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        self.s = []
+        self.y = []
+        self.x_prev = []
+        self.x_diff_prev = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        # self.schedulers = []  # Store schedulers for each worker
+
+        # self.early_stopping = EarlyStopping(patience=20, delta=0.001)
+
+        for worker_id, model in enumerate(self.workers_models):
+            s_worker = []
+            y_worker = []
+            x_prev_worker = []
+
+            for param in model.net.parameters():
+                s_worker.append(param.clone().detach().to(self.device))
+                x_prev_worker.append(param.clone().detach().to(self.device))
+            self.s.append(s_worker)
+            self.x_prev.append(x_prev_worker)
+            self.x_diff_prev
+
+            # Compute the initial gradients for y
+            model.net.to(self.device)
+            model.net.zero_grad()
+            x, y = next(iter(self.workers_iterators[worker_id]))
+            x = x.to(self.device, dtype=torch.float)
+            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            predictions = model.net(x)
+            loss = model.criterion(predictions, y)
+            loss.backward()
+
+            for param in model.net.parameters():
+                y_worker.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
+            self.y.append(y_worker)
+
+    def generate_comm_matrices(self, n_workers, min_degree, additional_edges):
+        rng = np.random.default_rng()
+
+        adj_matrix_A, disconnected_nodes_A = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges, poisson_rate=self.poisson_rate)
+        adj_matrix_B, disconnected_nodes_B = self.getAdjMat(rng, n_workers, min_degree=min_degree, additional_edges=additional_edges, poisson_rate=self.poisson_rate)
+        
+        self.disconnected_nodes_count = (len(disconnected_nodes_A) + len(disconnected_nodes_B)) / 2  # Average count of disconnected nodes
+
+        A = self.getArow(adj_matrix_A)
+        B = self.getBcol(adj_matrix_B)
+        
+        return A, B
+
+    def getAdjMat(self, rng, n, min_degree, additional_edges=5, poisson_rate=0):
+        Adj = np.zeros((n, n))
+        if n == 1:
+            Adj[0][0] = 1
+            return Adj, []
+
+        rng = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(1610925)))
+        num_disconnected_nodes = np.random.poisson(poisson_rate)
+        disconnected_nodes = rng.choice(n, num_disconnected_nodes, replace=False) if num_disconnected_nodes < n else []
+
+        # self-loop
+        for i in range(n):
+            if i not in disconnected_nodes:
+                Adj[i, i] = 1
+
+        non_disconnected_nodes = [i for i in range(n) if i not in disconnected_nodes]
+        for i in non_disconnected_nodes:
+            for _ in range(min_degree):
+                j = rng.choice(non_disconnected_nodes)
+                if i != j:
+                    Adj[i][j] = 1
+        while not self.is_strongly_connected(Adj, non_disconnected_nodes):
+            i = rng.choice(non_disconnected_nodes)
+            j = rng.choice(non_disconnected_nodes)
+            if i != j:
+                Adj[i][j] = 1
+
+        for _ in range(additional_edges):
+            i = rng.choice(non_disconnected_nodes)
+            j = rng.choice(non_disconnected_nodes)
+            if i != j:
+                Adj[i][j] = 1
+
+        for node in disconnected_nodes:
+            Adj[node, :] = 0
+            Adj[:, node] = 0
+
+        return Adj, disconnected_nodes
+
+    # Ensure the graph is strongly connected
+    def is_strongly_connected(self, adj_matrix, nodes):
+        subgraph = adj_matrix[nodes, :][:, nodes]
+        graph = csr_matrix(subgraph)
+        n_components, labels = connected_components(csgraph=graph, directed=True, connection='strong')
+        return n_components == 1
+
+    def getArow(self, Adj):
+        A = Adj.copy()
+        n = len(Adj)
+        for i in range(n):
+            sumRow = np.sum(Adj[i])
+            if sumRow > 0:
+                A[i] = Adj[i] / sumRow
+            else:
+                A[i, i] = 1.0  # Self-loop
+        return A
+
+    def getBcol(self, Adj):
+        AdjT = Adj.T
+        BT = AdjT.copy()
+        n = len(AdjT)
+        for i in range(n):
+            sumRow = np.sum(AdjT[i])
+            if sumRow > 0:
+                BT[i] = AdjT[i] / sumRow
+            else:
+                BT[i, i] = 1.0  # Self-loop
+        B = BT.T
+        return B  
+
+    def local_updates(self, worker_id):
+        """Perform local updates for a specific worker."""
+        model = self.workers_models[worker_id]
+        model.net.to(self.device)
+        if self.fit_by_epoch:
+            model.fit_iterator(train_iterator=self.workers_iterators[worker_id], n_epochs=self.local_steps, verbose=0)
+        else:
+            batch_loss, batch_acc, batch_gradients = model.fit_batches(
+                iterator=self.workers_iterators[worker_id], 
+                n_steps=self.local_steps
+            )
+            if ((self.round_idx - 1) % self.log_freq == 0):
+                print(f"Worker {worker_id}: Batch Loss: {batch_loss}, Batch Accuracy: {batch_acc}")
+        return batch_gradients
+    
+    def mix(self, write_results=True):
+        """Mix model parameters using communication matrices."""
+        gradients_list = []
+
+        if self.local:
+            for worker_id, model in enumerate(self.workers_models):
+                model.net.to(self.device)
+                gradients = self.local_updates(worker_id)
+                # for x, y in self.workers_iterators[worker_id]:
+                #     self.optimizer.zero_grad()
+                #     x = x.to(self.device, dtype=torch.float)
+                #     y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+                #     predictions = model.net(x)
+                #     loss = model.criterion(predictions, y)
+                #     loss.backward()
+    
+                # gradients = [param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device) for param in model.net.parameters()]
+                gradients_list.append(gradients)
+            self.gradient_list = gradients_list
+                
+        A, B = self.generate_comm_matrices(n_workers=self.n_workers, min_degree=self.min_degree, additional_edges=5)
+
+        x_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        s_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        y_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        # x_diff_new = [[torch.zeros_like(param) for param in model.net.parameters()] for model in self.workers_models]
+        new_gradients_list = []
+
+        for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
+            for worker_id, model in enumerate(self.workers_models):
+                x_new[worker_id][param_idx] = torch.zeros_like(list(model.net.parameters())[param_idx])
+                for j in range(self.n_workers):
+                    x_new[worker_id][param_idx] += A[worker_id, j] * self.s[j][param_idx]
+                x_new[worker_id][param_idx] -= self.alpha * self.y[worker_id][param_idx]
+                # x_new[worker_id][param_idx] += self.beta / self.gamma * (self.s[worker_id][param_idx] - self.x_prev[worker_id][param_idx])
+                x_new[worker_id][param_idx] += self.beta * self.x_diff_prev[worker_id][param_idx]               
+                self.x_diff_prev[worker_id][param_idx] = x_new[worker_id][param_idx] - self.x_prev[worker_id][param_idx]
+                
+        for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
+            for worker_id, model in enumerate(self.workers_models):
+                s_new[worker_id][param_idx] = x_new[worker_id][param_idx] + self.gamma * self.x_diff_prev[worker_id][param_idx]
+                self.x_prev[worker_id][param_idx] = x_new[worker_id][param_idx]
+                self.s[worker_id][param_idx] = s_new[worker_id][param_idx]
+
+        # Compute new gradients for s_new
+        for worker_id, model in enumerate(self.workers_models):
+            for param_idx, param in enumerate(model.net.parameters()):
+                param.data = s_new[worker_id][param_idx].data
+            model.net.to(self.device)
+            model.net.zero_grad()
+            x, y = next(iter(self.workers_iterators[worker_id]))
+            x = x.to(self.device, dtype=torch.float)
+            y = y.to(self.device, dtype=torch.float).unsqueeze(-1)
+            predictions = model.net(x)
+            loss = model.criterion(predictions, y)
+            loss.backward()
+            
+            new_gradients = []
+            for param in model.net.parameters():
+                new_gradients.append(param.grad.clone().detach().to(self.device) if param.grad is not None else torch.zeros_like(param).to(self.device))
+            new_gradients_list.append(new_gradients)
+
+        for param_idx in range(len(list(self.workers_models[0].net.parameters()))):
+            for worker_id, model in enumerate(self.workers_models):
+                diff_grad = new_gradients_list[worker_id][param_idx] - self.gradients_list[worker_id][param_idx]
+
+                # print(f"Worker {worker_id} - Param {param_idx} - Shape of gradient: {gradients_list[worker_id][param_idx].shape}")
+                # print(f"Worker {worker_id} - Param {param_idx} - Shape of new gradient: {new_gradients_list[worker_id][param_idx].shape}")
+
+                y_new[worker_id][param_idx] = torch.zeros_like(self.y[worker_id][param_idx])
+                for j in range(self.n_workers):
+                    y_new[worker_id][param_idx] += B[j, worker_id] * self.y[j][param_idx]
+                y_new[worker_id][param_idx] += diff_grad
+                self.y[worker_id][param_idx] = y_new[worker_id][param_idx]
+
+        self.gradient_list = new_gradients_list
+        
+                # write logs
+        if ((self.round_idx - 1) % self.log_freq == 0) and write_results:
+            for param_idx, param in enumerate(self.global_model.net.parameters()):
+                param.data.fill_(0.)
+                for worker_model in self.workers_models:
+                    param.data += (1 / self.n_workers) * list(worker_model.net.parameters())[param_idx].data.clone()
+            self.write_logs()
+
+        if self.rmse_flag: self.local_steps = 6
+        if self.medium_rmse_flag: self.local_steps = 8
+        if self.small_rmse_flag: 
+            self.local_steps = 10
+            self.batch_size_train = 64
+        
+        self.round_idx += 1
+
+    def write_logs(self):
+        """
+        write train/test loss, train/tet accuracy for average model and local models
+         and intra-workers parameters variance (consensus) and save average model
+        """
+        super().write_logs()
+        self.logger.add_scalar("Disconnected Nodes", self.disconnected_nodes_count, self.round_idx)
+        self.logger_write_param.write(f'\t -----: Disconnected Nodes: {self.disconnected_nodes_count}')
+
 class CentralizedNetwork(Network):
     def __init__(self, args):        
         super(CentralizedNetwork, self).__init__(args)
