@@ -168,56 +168,6 @@ class Network(ABC):
         self.logger_write_param.write(f'\t -----: Total Time: {time.time() - self.time_start:.3f}')
 
         self.time_start_update = time.time()
-
-        if self.reload:
-            if self.args.experiment == "driving_gazebo":
-                if test_rmse < 0.04:
-                    self.rmse_flag = True
-                    if test_rmse < 0.03:
-                        self.medium_rmse_flag = True
-                        if test_rmse < 0.02:
-                            self.small_rmse_flag = True
-
-                    if test_rmse < self.best_rmse:
-                        self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                        self.best_rmse = test_rmse
-                        if self.medium_rmse_flag:
-                            self.save_models(round=self.round_idx)
-                        self.best_round = self.round_idx
-                        self.best_rmse_arr.append(test_rmse)
-                    # else:
-                        # self.logger_write_param.write(f'\t -----: Reload model from round: {self.best_round}') 
-                        # self.load_models(round=self.best_round)
-            elif self.args.experiment == "driving_carla": 
-                if test_rmse < 0.08:
-                    self.rmse_flag = True
-                    if test_rmse < 0.07:
-                        self.medium_rmse_flag = True
-                        if test_rmse < 0.06:
-                            self.small_rmse_flag = True
-
-                    if test_rmse < self.best_rmse:
-                        self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                        self.best_rmse = test_rmse
-                        if self.medium_rmse_flag:
-                            self.save_models(round=self.round_idx)
-                        self.best_round = self.round_idx
-                        self.best_rmse_arr.append(test_rmse)
-            else: 
-                if test_rmse < 0.1:
-                    self.rmse_flag = True
-                    if test_rmse < 0.09:
-                        self.medium_rmse_flag = True
-                        if test_rmse < 0.08:
-                            self.small_rmse_flag = True
-
-                    if test_rmse < self.best_rmse:
-                        self.logger_write_param.write(f'\t -----: Best RMSE: {test_rmse:.5f}')
-                        self.best_rmse = test_rmse
-                        if self.medium_rmse_flag:
-                            self.save_models(round=self.round_idx)
-                        self.best_round = self.round_idx
-                        self.best_rmse_arr.append(test_rmse)
                         
         # if not self.args.test:
         #     self.save_models(round=self.round_idx)
