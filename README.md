@@ -65,3 +65,5 @@ bash train_gazebo_gaia.sh
 *<center>**Figure 3**: Initial results.</center>*
 
 * The result demonstrates that our proposed method outperformed the existing methods for time-varying communication graphs (A/B push-pull, Accelerated A/B push-pull) and comparable to the baseline methods with fixed networks (Centralized Network, DPASGD), which means the proposed algorithm still yields optimal results while the networks changing.
+![Fig-4](misc/activation.png)
+*<center>**Figure 4**: Activation map visualization. The focused parts have warmer colors and the less important features have cooler colors</center>*
